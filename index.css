@@ -1,0 +1,44 @@
+/* Modo normal */
+body.normal-contrast {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+body.high-dark {
+  background-color: #000000;
+  color: #facc15;
+}
+
+body.high-dark * {
+  background-color: #000000 !important;
+  color: #facc15 !important;
+  border-color: #facc15 !important;
+}
+
+body.high-light {
+  background-color: #ffffff;
+  color: #000000;
+}
+
+body.high-light * {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  border-color: #000000 !important;
+}
+
+body.high-impact {
+  background-color: #000000;
+  color: #ffeb3b;
+}
+
+body.high-impact * {
+  background-color: #000000 !important;
+  color: #ffeb3b !important;
+  border-color: #ffeb3b !important;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  transition: background-color 0.2s, color 0.2s;
+}

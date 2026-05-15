@@ -1,0 +1,12 @@
+.logo-iaet-container {
+  display: flex;
+  justify-content: center;  /* centrar horizontal */
+  align-items: center;      /* centrar vertical (si el contenedor tiene altura) */
+}
+
+/* Tamaño pequeño del logo */
+.logo-iaet {
+  height: 6px;   /* ajusta: 10px, 8px, 6px según necesidad */
+  width: auto;
+  display: block;
+}

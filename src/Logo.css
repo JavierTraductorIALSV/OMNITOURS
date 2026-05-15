@@ -1,0 +1,13 @@
+/* Contenedor para centrar el logo */
+.logo-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Tamaño pequeño del logo */
+.logo-pequeno {
+  height: 10px;       /* Si aún lo ves grande, cambia a 10px, 8px o 6px */
+  width: auto;
+  display: block;     /* Opcional: evita espacios extra */
+}
