@@ -948,7 +948,7 @@ const App = () => {
           </div>
         )}
 
-        {/* ADMIN DASHBOARD CON TABLA Y FILTROS */}
+        {/* ADMIN DASHBOARD CON TABLA Y FILTROS (con numeración) */}
         {view === 'adminDashboard' && (
           <div className="max-w-7xl mx-auto">
             <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
@@ -1016,7 +1016,7 @@ const App = () => {
               )}
             </div>
 
-            {/* Tabla de empresas */}
+            {/* Tabla de empresas con numeración automática */}
             <div className="bg-white rounded-2xl shadow p-6">
               <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
                 <h3 className="text-lg font-black">Listado de empresas registradas</h3>
@@ -1040,6 +1040,7 @@ const App = () => {
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Empresa</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">RIF</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sector</th>
@@ -1052,14 +1053,15 @@ const App = () => {
                   <tbody className="bg-white divide-y divide-gray-200">
                     {filteredCompanies.length === 0 ? (
                       <tr>
-                        <td colSpan="7" className="px-4 py-8 text-center text-gray-500">No hay empresas registradas en este estado.</td>
+                        <td colSpan="8" className="px-4 py-8 text-center text-gray-500">No hay empresas registradas en este estado.</td>
                       </tr>
                     ) : (
-                      filteredCompanies.map(emp => {
+                      filteredCompanies.map((emp, index) => {
                         const parts = emp.address ? emp.address.split(',') : [];
                         const estado = parts.length > 2 ? parts[2].trim() : 'No especificado';
                         return (
                           <tr key={emp.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 font-bold">{index + 1}</td>
                             <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{emp.name}</td>
                             <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{emp.rif}</td>
                             <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{emp.sector}</td>
