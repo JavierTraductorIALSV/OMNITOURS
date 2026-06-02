@@ -4,12 +4,13 @@ import {
   Bus, Palmtree, Library, Wind, MapPin, ArrowRight,
   Eye, Ear, Brain, Smartphone, ShieldAlert, FileText, Navigation,
   Globe, Umbrella, ChevronRight, Info, ShieldCheck, TrendingUp, Camera,
-  LogIn, LogOut, Type, Contrast, CheckCircle2
+  LogIn, LogOut, Type, Contrast, CheckCircle2, Download, BarChart
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import Chart from 'chart.js/auto';
+import * as XLSX from 'xlsx';
 
 const App = () => {
   // Estados de accesibilidad
@@ -20,13 +21,16 @@ const App = () => {
   const [view, setView] = useState('home');
   const [currentModule, setCurrentModule] = useState(0);
   const [answers, setAnswers] = useState({});
-  const [evidences, setEvidences] = useState({}); // { qId: [{ url: '', analysis: '' }] }
+  const [evidences, setEvidences] = useState({});
   const [companyData, setCompanyData] = useState({
     name: '', rif: '', rtn: '', date: new Date().toISOString().split('T')[0],
     sector: '', address: '', city: '', state: '', phone: '', email: ''
   });
   const [adminSession, setAdminSession] = useState(null);
   const [allCompanies, setAllCompanies] = useState([]);
+  const [filteredCompanies, setFilteredCompanies] = useState([]);
+  const [selectedState, setSelectedState] = useState('');
+  const [statsByState, setStatsByState] = useState([]);
   const [uploadMessage, setUploadMessage] = useState({ show: false, text: '', type: '' });
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -35,17 +39,11 @@ const App = () => {
   const [loading, setLoading] = useState(false);
   const [registrationErrors, setRegistrationErrors] = useState({});
 
-  // Credenciales de administradores (locales, no dependen de Supabase Auth)
+  // Credenciales de administradores (locales)
   const ADMIN_CREDENTIALS = [
     { email: 'javier.investigacionlsv@gmail.com', password: '123' },
     { email: 'juanenriquelujananzola@gmail.com', password: '260479' }
   ];
-
-  // Marca de agua IAET (pequeña)
-  const waterMarkStyle = {
-    position: 'fixed', bottom: '20px', right: '20px', opacity: 0.15,
-    zIndex: 999, pointerEvents: 'none', width: '30px',
-  };
 
   // Datos de ubicación (completos)
   const venezuelaStates = [
@@ -90,7 +88,7 @@ const App = () => {
     { id: 'playa', label: 'Servicios de Playa', icon: <Umbrella size={24} /> },
   ];
 
-  // Módulos de evaluación (íntegros)
+  // Módulos de evaluación (completos)
   const registrationModules = [
     { id: 'm1-1', title: 'MÓDULO 1.1: Acceso y Circulación', description: 'Escala: 0 (No Cumple) / 1 (Parcial) / 2 (Cumple)', questions: [
       { id: 'm1_1', text: 'Acceso: ¿Existen rampas con pendiente adecuada (máx. 6-8%) y pasamanos?', cat: 'Motora', max: 2 },
@@ -228,7 +226,7 @@ const App = () => {
     return true;
   };
 
-  // ========== SUBIR FOTOS (análisis oculto) ==========
+  // ========== SUBIR FOTOS ==========
   const getQuestionText = (qId) => {
     for (let mod of registrationModules) {
       const q = mod.questions.find(q => q.id === qId);
@@ -332,7 +330,7 @@ const App = () => {
     }
   };
 
-  // ========== ADMIN (LOGIN LOCAL CON ARRAY DE CREDENCIALES) ==========
+  // ========== ADMIN (LOGIN LOCAL) ==========
   const handleAdminLogin = (e) => {
     e.preventDefault();
     const isValid = ADMIN_CREDENTIALS.some(admin => 
@@ -348,8 +346,10 @@ const App = () => {
   };
 
   const cargarEmpresas = async () => {
-    const { data } = await supabase.from('companies').select('*');
+    const { data } = await supabase.from('companies').select('*').order('created_at', { ascending: false });
     setAllCompanies(data || []);
+    setFilteredCompanies(data || []);
+    calcularStatsPorEstado(data || []);
   };
 
   const logout = () => {
@@ -380,6 +380,71 @@ const App = () => {
     }
   };
 
+  // ========== FUNCIONES PARA TABLA ADMIN ==========
+  const calcularStatsPorEstado = (companies) => {
+    const stats = {};
+    companies.forEach(emp => {
+      if (!emp.address) return;
+      const parts = emp.address.split(',');
+      const estado = parts.length > 2 ? parts[2].trim() : 'Desconocido';
+      if (!stats[estado]) {
+        stats[estado] = { count: 0, totalPct: 0, sumPct: 0 };
+      }
+      stats[estado].count++;
+      stats[estado].sumPct += emp.total_percentage || 0;
+      stats[estado].totalPct = stats[estado].sumPct / stats[estado].count;
+    });
+    const statsArray = Object.entries(stats).map(([estado, data]) => ({
+      estado,
+      cantidad: data.count,
+      promedio: Math.round(data.totalPct)
+    }));
+    setStatsByState(statsArray);
+  };
+
+  const filtrarPorEstado = (estado) => {
+    setSelectedState(estado);
+    if (estado === '') {
+      setFilteredCompanies(allCompanies);
+    } else {
+      const filtradas = allCompanies.filter(emp => {
+        if (!emp.address) return false;
+        const parts = emp.address.split(',');
+        const estadoEmp = parts.length > 2 ? parts[2].trim() : '';
+        return estadoEmp === estado;
+      });
+      setFilteredCompanies(filtradas);
+    }
+  };
+
+  // Exportar a Excel (XLSX)
+  const exportToExcel = () => {
+    const data = filteredCompanies.map(emp => {
+      const parts = emp.address ? emp.address.split(',') : [];
+      const estado = parts.length > 2 ? parts[2].trim() : 'No especificado';
+      return {
+        'Nombre': emp.name,
+        'RIF': emp.rif,
+        'Sector': emp.sector,
+        'Estado': estado,
+        'Porcentaje': `${emp.total_percentage || 0}%`,
+        'Fecha Registro': new Date(emp.created_at).toLocaleDateString()
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Empresas');
+    XLSX.writeFile(wb, `empresas_registradas_${new Date().toISOString().slice(0,10)}.xlsx`);
+  };
+
+  const getPctColor = (pct) => {
+    if (pct >= 85) return 'bg-green-500';
+    if (pct >= 75) return 'bg-emerald-500';
+    if (pct >= 60) return 'bg-yellow-500';
+    if (pct >= 50) return 'bg-orange-500';
+    return 'bg-red-500';
+  };
+
   // ========== AGRUPACIÓN DE MÓDULOS PARA EL REPORTE ==========
   const reportModules = [
     { name: 'Infraestructura y Entorno Físico', subModules: ['m1-1', 'm1-2', 'm1-3'] },
@@ -390,7 +455,7 @@ const App = () => {
   ];
   const chartColors = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
-  // ========== DESCRIPCIÓN DE CATEGORÍAS (texto) ==========
+  // ========== DESCRIPCIÓN DE CATEGORÍAS ==========
   const getCategoryDescription = (name, pct) => {
     if (name === 'Infraestructura y Entorno Físico') {
       if (pct === 0) return `El módulo "${name}" es nulo. No se evidencia accesibilidad. Comenzar desde cero con un diagnóstico detallado y un plan integral.`;
@@ -425,7 +490,7 @@ const App = () => {
     return `Módulo evaluado con ${pct}% de cumplimiento.`;
   };
 
-  // ========== GENERAR PDF CON MÁRGENES 3 CM Y DISEÑO ORDENADO ==========
+  // ========== GENERAR PDF CON MÁRGENES 3 CM ==========
   const generateCompanyReportPDF = async (company) => {
     try {
       const { data: respuestas } = await supabase.from('answers').select('*').eq('company_id', company.id);
@@ -551,7 +616,7 @@ const App = () => {
         ${styles}
         <div id="pdfContainer">
           <div style="text-align: center;">
-            <img src="/Logo-OmniTours2.png" style="height: 80px;" />
+            <img src="/Logo-Omnitours.png" style="height: 50px;" />
             <h1>Informe de Accesibilidad Turística</h1>
             <h2 style="color: #555;">${company.name}</h2>
             <p><strong>RIF:</strong> ${company.rif} | <strong>RTN:</strong> ${company.rtn || 'N/A'} | <strong>Sector:</strong> ${company.sector}</p>
@@ -676,12 +741,15 @@ const App = () => {
   // ========== RENDER PRINCIPAL ==========
   return (
     <div className="flex flex-col h-screen font-sans relative" style={textSizeStyle}>
-      <img src="/iaet-logo.png" alt="IAET" style={waterMarkStyle} />
+      {/* Marca de agua IAET fija y pequeña */}
+      <img src="/iaet-logo.png" alt="IAET" style={{ position: 'fixed', bottom: '20px', right: '20px', opacity: 0.15, zIndex: 999, pointerEvents: 'none', width: '30px' }} />
+      
       {uploadMessage.show && (
         <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-4 py-2 rounded-full shadow-lg text-white text-sm font-bold ${uploadMessage.type === 'success' ? 'bg-green-500' : 'bg-red-500'}`}>
           {uploadMessage.text}
         </div>
       )}
+      
       <header className="bg-white/90 backdrop-blur-md p-4 shadow-sm flex justify-between items-center sticky top-0 z-50 border-b">
         <img src="/Logo-Omnitours.png" alt="Omnitours" style={{ height: '230px', width: 'auto' }} />
         <div className="flex gap-2 items-center">
@@ -695,28 +763,29 @@ const App = () => {
           )}
         </div>
       </header>
+
       <main className="flex-1 overflow-y-auto p-4 pb-32">
-        {/* HOME */}
+        {/* ========== PANTALLA DE INICIO ========== */}
         {view === 'home' && (
           <div className="max-w-md mx-auto space-y-6 pt-8 text-center">
             <h1 className="text-3xl font-black italic uppercase">Sistema de Registro<br/>Omnitours "Turismo para todos"</h1>
             <p className="text-sm">Plataforma oficial de registro técnico y verificación de accesibilidad universal.</p>
             <div className="bg-white p-8 rounded-3xl shadow-xl border relative">
-           {/*<ShieldCheck size={120} className="absolute top-0 right-0 opacity-5" />*/}
+              <ShieldCheck size={120} className="absolute top-0 right-0 opacity-5" />
               <h3 className="text-xl font-black mb-2">Inscribir Empresa</h3>
               <p className="text-xs mb-8">Complete el registro técnico aportando la información requerida por el Baremo de accesibilidad turística.</p>
               <button onClick={() => setView('registration')} className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black flex items-center justify-center gap-2 active:bg-teal-500 active:scale-95">
                 Iniciar Proceso de Registro <ArrowRight size={18} />
               </button>
               <div className="flex justify-center items-center gap-2 mt-8 text-slate-400 text-[10px]">
-               <img src="/iaet-logo.png" alt="IAET" style={{ height: '150px', width: 'auto' }} />
+                <img src="/iaet-logo.png" alt="IAET" style={{ height: '150px', width: 'auto' }} />
                 <span>App desarrollada por el IAET</span>
               </div>
             </div>
           </div>
         )}
 
-        {/* REGISTRO */}
+        {/* REGISTRO (vista registration) */}
         {view === 'registration' && (
           <div className="max-w-md mx-auto space-y-6">
             <div className="bg-white p-6 rounded-3xl shadow border">
@@ -776,9 +845,7 @@ const App = () => {
                             : 'bg-white text-slate-700 border-slate-200 hover:border-emerald-300 hover:bg-emerald-50'
                         }`}
                       >
-                        {companyData.sector === s.id && (
-                          <CheckCircle2 size={20} className="absolute top-2 right-2 text-white" />
-                        )}
+                        {companyData.sector === s.id && <CheckCircle2 size={20} className="absolute top-2 right-2 text-white" />}
                         {s.icon}
                         <span className="text-[10px] font-black uppercase">{s.label}</span>
                       </button>
@@ -792,7 +859,7 @@ const App = () => {
           </div>
         )}
 
-        {/* AUDITORÍA */}
+        {/* CUESTIONARIO */}
         {view === 'audit' && (
           <div className="max-w-xl mx-auto space-y-6 pb-20">
             <div className="bg-indigo-600 p-6 rounded-3xl text-white shadow-xl">
@@ -843,7 +910,7 @@ const App = () => {
           </div>
         )}
 
-        {/* RESULTADOS */}
+        {/* RESULTADOS (pantalla de resultados) */}
         {view === 'results' && (
           <div id="report-content" className="max-w-md mx-auto space-y-6 pb-32">
             <div className="bg-white p-6 rounded-3xl shadow-xl text-center">
@@ -881,16 +948,50 @@ const App = () => {
           </div>
         )}
 
-        {/* ADMIN DASHBOARD */}
+        {/* ADMIN DASHBOARD CON TABLA Y FILTROS */}
         {view === 'adminDashboard' && (
-          <div className="max-w-4xl mx-auto">
-            <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
+          <div className="max-w-7xl mx-auto">
+            <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
               <h2 className="text-2xl font-black">Panel de Administrador</h2>
               <div className="flex gap-2">
                 <button onClick={() => setView('home')} className="bg-slate-200 px-4 py-2 rounded-xl text-sm font-black active:bg-teal-500">← Volver al inicio</button>
                 <button onClick={logout} className="bg-red-100 text-red-700 px-4 py-2 rounded-xl text-sm font-black active:bg-teal-500">Cerrar sesión</button>
               </div>
             </div>
+
+            {/* Resumen por estado */}
+            <div className="bg-white rounded-2xl shadow p-6 mb-8">
+              <h3 className="text-xl font-black mb-4 flex items-center gap-2"><BarChart size={24} className="text-indigo-600"/> Resumen por estado</h3>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Empresas</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Promedio accesibilidad</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {statsByState.map((stat, idx) => (
+                      <tr key={idx} className="hover:bg-gray-50 cursor-pointer" onClick={() => filtrarPorEstado(stat.estado)}>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{stat.estado}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{stat.cantidad}</td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <div className="w-24 bg-gray-200 rounded-full h-2">
+                              <div className={`h-2 rounded-full ${getPctColor(stat.promedio)}`} style={{ width: `${stat.promedio}%` }}></div>
+                            </div>
+                            <span className="text-sm font-bold">{stat.promedio}%</span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Buscador por RIF */}
             <div className="bg-white p-6 rounded-2xl shadow mb-6">
               <h3 className="text-lg font-black mb-4">Generar reporte por empresa</h3>
               <div className="flex flex-col sm:flex-row gap-3">
@@ -909,35 +1010,88 @@ const App = () => {
                       <button onClick={() => generateCompanyReportPDF(searchResult.empresa)} className="bg-green-600 text-white px-4 py-2 rounded-xl text-sm font-black active:bg-teal-500">📄 Generar reporte PDF</button>
                     </div>
                   ) : (
-                    <p className="text-red-500 font-bold">❌ La empresa con RIF ${searchResult.rif} no se ha registrado.</p>
+                    <p className="text-red-500 font-bold">❌ La empresa con RIF {searchResult.rif} no se ha registrado.</p>
                   )}
                 </div>
               )}
             </div>
-            <div className="bg-white p-6 rounded-2xl shadow">
-              <h3 className="text-lg font-black mb-4">Empresas registradas</h3>
-              <div className="space-y-3 max-h-96 overflow-y-auto">
-                {allCompanies.length === 0 ? (
-                  <p className="text-slate-400 text-center py-4">No hay empresas registradas aún.</p>
-                ) : (
-                  allCompanies.map(emp => (
-                    <div key={emp.id} className="border-b pb-3 flex justify-between items-center flex-wrap gap-2">
-                      <div>
-                        <p className="font-bold">{emp.name}</p>
-                        <p className="text-xs text-slate-500">RIF: {emp.rif} | Score: {emp.total_percentage}%</p>
-                        <p className="text-xs text-slate-400 truncate max-w-xs">{emp.address}</p>
-                      </div>
-                      <button onClick={() => generateCompanyReportPDF(emp)} className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-xs font-black active:bg-teal-500">📄 Reporte PDF</button>
-                    </div>
-                  ))
-                )}
+
+            {/* Tabla de empresas */}
+            <div className="bg-white rounded-2xl shadow p-6">
+              <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
+                <h3 className="text-lg font-black">Listado de empresas registradas</h3>
+                <div className="flex gap-3">
+                  <select 
+                    value={selectedState} 
+                    onChange={(e) => filtrarPorEstado(e.target.value)} 
+                    className="border rounded-xl px-4 py-2 text-sm font-black bg-white"
+                  >
+                    <option value="">Todos los estados</option>
+                    {venezuelaStates.map(state => (
+                      <option key={state} value={state}>{state}</option>
+                    ))}
+                  </select>
+                  <button onClick={exportToExcel} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-black flex items-center gap-2 active:bg-teal-500">
+                    <Download size={16}/> Exportar Excel
+                  </button>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Empresa</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">RIF</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sector</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Accesibilidad</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fecha</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {filteredCompanies.length === 0 ? (
+                      <tr>
+                        <td colSpan="7" className="px-4 py-8 text-center text-gray-500">No hay empresas registradas en este estado.</td>
+                      </tr>
+                    ) : (
+                      filteredCompanies.map(emp => {
+                        const parts = emp.address ? emp.address.split(',') : [];
+                        const estado = parts.length > 2 ? parts[2].trim() : 'No especificado';
+                        return (
+                          <tr key={emp.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{emp.name}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{emp.rif}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{emp.sector}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{estado}</td>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <div className="flex items-center gap-2">
+                                <div className="w-20 bg-gray-200 rounded-full h-2">
+                                  <div className={`h-2 rounded-full ${getPctColor(emp.total_percentage || 0)}`} style={{ width: `${emp.total_percentage || 0}%` }}></div>
+                                </div>
+                                <span className="text-sm font-bold">{emp.total_percentage || 0}%</span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{new Date(emp.created_at).toLocaleDateString()}</td>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <button onClick={() => generateCompanyReportPDF(emp)} className="bg-indigo-600 text-white px-3 py-1 rounded-lg text-xs font-black hover:bg-indigo-700 active:bg-teal-500">📄 Reporte</button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="mt-4 text-sm text-gray-500">
+                Total empresas registradas: {filteredCompanies.length}
               </div>
             </div>
           </div>
         )}
       </main>
 
-      {/* NAVEGACIÓN INFERIOR */}
+      {/* Navegación inferior */}
       {(view === 'home' || view === 'registration' || view === 'audit' || view === 'results') && (
         <nav className="bg-white/90 backdrop-blur-xl border-t fixed bottom-0 w-full flex justify-around items-center h-24 px-8 pb-6 shadow-lg z-50">
           <button onClick={() => setView('home')} className={`flex flex-col items-center gap-1.5 active:bg-teal-500 active:rounded-full active:p-1 ${view === 'home' ? 'text-indigo-600' : 'text-slate-300'}`}><LayoutDashboard size={24} /><span className="text-[9px] font-black">Inicio</span></button>
