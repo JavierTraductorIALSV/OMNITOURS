@@ -1,8 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
-import './Logo.css'; 
-import './LogoIAET.css';
+import * as serviceWorkerRegistration from './serviceWorkerRegistration'; // Si no existe, lo creamos
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
@@ -10,3 +9,6 @@ root.render(
     <App />
   </React.StrictMode>
 );
+
+// Registrar Service Worker
+serviceWorkerRegistration.register();

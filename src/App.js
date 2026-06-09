@@ -7,19 +7,31 @@ import {
   LogIn, LogOut, Type, Contrast, CheckCircle2, Download, BarChart
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
-import Chart from 'chart.js/auto';
 import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
+import { Document, Packer, Paragraph, TextRun, ImageRun, AlignmentType, Header } from 'docx';
+
+// Función auxiliar para convertir dataURI a Blob (para fotos offline)
+const dataURItoBlob = (dataURI) => {
+  const byteString = atob(dataURI.split(',')[1]);
+  const mimeString = dataURI.split(',')[0].split(':')[1].split(';')[0];
+  const ab = new ArrayBuffer(byteString.length);
+  const ia = new Uint8Array(ab);
+  for (let i = 0; i < byteString.length; i++) {
+    ia[i] = byteString.charCodeAt(i);
+  }
+  return new Blob([ab], { type: mimeString });
+};
 
 const App = () => {
-  // Estados de accesibilidad
+  // ========== ESTADOS DE ACCESIBILIDAD ==========
   const [contrastMode, setContrastMode] = useState('normal-contrast');
   const [fontSizeMultiplier, setFontSizeMultiplier] = useState(1);
   
-  // Estados principales
+  // ========== ESTADOS PRINCIPALES ==========
   const [view, setView] = useState('home');
   const [currentModule, setCurrentModule] = useState(0);
+  const [currentQuestionPage, setCurrentQuestionPage] = useState(0);
   const [answers, setAnswers] = useState({});
   const [evidences, setEvidences] = useState({});
   const [companyData, setCompanyData] = useState({
@@ -38,20 +50,23 @@ const App = () => {
   const [searchResult, setSearchResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [registrationErrors, setRegistrationErrors] = useState({});
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
 
-  // Credenciales de administradores (locales)
+  // ========== CREDENCIALES DE ADMINISTRADORES ==========
   const ADMIN_CREDENTIALS = [
     { email: 'javier.investigacionlsv@gmail.com', password: '123' },
     { email: 'juanenriquelujananzola@gmail.com', password: '260479' }
   ];
 
-  // Datos de ubicación (completos)
+  // ========== DATOS DE UBICACIÓN ==========
   const venezuelaStates = [
     'Amazonas', 'Anzoátegui', 'Apure', 'Aragua', 'Barinas', 'Bolívar', 'Carabobo',
     'Cojedes', 'Delta Amacuro', 'Distrito Capital', 'Falcón', 'Guárico', 'Lara',
     'Mérida', 'Miranda', 'Monagas', 'Nueva Esparta', 'Portuguesa', 'Sucre',
     'Táchira', 'Trujillo', 'La Guaira', 'Yaracuy', 'Zulia'
   ];
+
   const municipalities = {
     'Distrito Capital': ['Libertador'],
     'Miranda': ['Baruta', 'Carrizal', 'Chacao', 'El Hatillo', 'Guaicaipuro', 'Sucre', 'Zamora'],
@@ -88,7 +103,7 @@ const App = () => {
     { id: 'playa', label: 'Servicios de Playa', icon: <Umbrella size={24} /> },
   ];
 
-  // Módulos de evaluación (completos)
+  // ========== MÓDULOS DE EVALUACIÓN (igual que tenías) ==========
   const registrationModules = [
     { id: 'm1-1', title: 'MÓDULO 1.1: Acceso y Circulación', description: 'Escala: 0 (No Cumple) / 1 (Parcial) / 2 (Cumple)', questions: [
       { id: 'm1_1', text: 'Acceso: ¿Existen rampas con pendiente adecuada (máx. 6-8%) y pasamanos?', cat: 'Motora', max: 2 },
@@ -150,7 +165,15 @@ const App = () => {
     ]}
   ];
 
-  // ================= CONFIGURACIÓN DE CONTRASTE GLOBAL =================
+  const reportModules = [
+    { name: 'Infraestructura y Entorno Físico', subModules: ['m1-1', 'm1-2', 'm1-3'] },
+    { name: 'Conocimientos y Herramientas para la Atención', subModules: ['m2'] },
+    { name: 'Disponibilidad de Ayudas Técnicas', subModules: ['m3', 'm3-2'] },
+    { name: 'Herramientas Tecnológicas de Apoyo', subModules: ['m4'] },
+    { name: 'Gestión de Emergencias', subModules: ['m5'] }
+  ];
+
+  // ========== CONFIGURACIÓN DE CONTRASTE ==========
   useEffect(() => {
     document.body.className = contrastMode;
     const style = document.createElement('style');
@@ -164,36 +187,30 @@ const App = () => {
       body.high-impact button, body.high-impact input, body.high-impact select, body.high-impact textarea { background-color: #222 !important; border-color: #ffeb3b !important; color: #ffeb3b !important; }
     `;
     if (!document.getElementById('contrast-styles')) document.head.appendChild(style);
-    return () => {
-      const existing = document.getElementById('contrast-styles');
-      if (existing) existing.remove();
-    };
-  }, []);
+    return () => document.getElementById('contrast-styles')?.remove();
+  }, [contrastMode]);
 
   const cycleContrastMode = () => {
     const modes = ['normal-contrast', 'high-dark', 'high-light', 'high-impact'];
     const currentIndex = modes.indexOf(contrastMode);
     const nextIndex = (currentIndex + 1) % modes.length;
-    const newMode = modes[nextIndex];
-    setContrastMode(newMode);
-    document.body.className = newMode;
+    setContrastMode(modes[nextIndex]);
+    document.body.className = modes[nextIndex];
   };
 
   const increaseFontSize = () => setFontSizeMultiplier(v => Math.min(v + 0.1, 1.5));
   const decreaseFontSize = () => setFontSizeMultiplier(v => Math.max(v - 0.1, 0.8));
 
   // ========== FUNCIONES DE PUNTUACIÓN ==========
-  const handleAnswer = (qId, val) => setAnswers(prev => ({ ...prev, [qId]: val }));
-
   const getModuleScore = (moduleId) => {
     const mod = registrationModules.find(m => m.id === moduleId);
-    if (!mod) return { score:0, max:1, pct:0 };
+    if (!mod) return { score: 0, max: 1, pct: 0 };
     let score = 0, max = 0;
     mod.questions.forEach(q => {
       score += (answers[q.id] || 0);
       max += q.max;
     });
-    return { score, max, pct: Math.round((score/max)*100) || 0 };
+    return { score, max, pct: Math.round((score / max) * 100) || 0 };
   };
 
   const getTotalStats = () => {
@@ -203,7 +220,7 @@ const App = () => {
       totalScore += s.score;
       totalMax += s.max;
     });
-    const pct = Math.round((totalScore/totalMax)*100) || 0;
+    const pct = Math.round((totalScore / totalMax) * 100) || 0;
     return { score: totalScore, max: totalMax, pct };
   };
 
@@ -243,37 +260,160 @@ const App = () => {
     return `Se detectan elementos relacionados con: ${found.join(', ')}. La evidencia visual sugiere ${Math.random() > 0.5 ? 'cumplimiento parcial' : 'necesidad de mejora'}.`;
   };
 
-  const handlePhotoUpload = async (qId, photoIndex) => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.onchange = async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const btn = document.getElementById(`btn-${qId}-${photoIndex}`);
-      if (btn) btn.innerText = 'Subiendo...';
-      const fileName = `${companyData.rif || 'temp'}_${qId}_${photoIndex}_${Date.now()}.jpg`;
-      const { error } = await supabase.storage.from('evidencias').upload(fileName, file);
-      if (error) {
-        setUploadMessage({ show: true, text: '❌ Error al subir', type: 'error' });
-        if (btn) btn.innerText = 'Reintentar';
-        setTimeout(() => setUploadMessage({ show: false, text: '', type: '' }), 3000);
-        return;
-      }
-      const { data: publicUrlData } = supabase.storage.from('evidencias').getPublicUrl(fileName);
-      const photoUrl = publicUrlData.publicUrl;
-      const analysis = analyzeImage(qId);
-      setEvidences(prev => {
-        const current = prev[qId] || [];
-        const updated = [...current];
-        updated[photoIndex] = { url: photoUrl, analysis: analysis };
-        return { ...prev, [qId]: updated };
-      });
-      setUploadMessage({ show: true, text: '✅ Archivo guardado', type: 'success' });
-      if (btn) btn.innerHTML = '✓ Foto';
-      setTimeout(() => setUploadMessage({ show: false, text: '', type: '' }), 2000);
+  // ========== GUARDADO LOCAL Y PROGRESO ==========
+  const saveProgressLocally = () => {
+    const progress = {
+      answers,
+      currentModule,
+      currentQuestionPage,
+      companyData,
+      evidences,
+      timestamp: Date.now()
     };
-    input.click();
+    localStorage.setItem('omnitour_progress', JSON.stringify(progress));
+  };
+
+  const loadProgressLocally = () => {
+    const saved = localStorage.getItem('omnitour_progress');
+    if (saved) {
+      try {
+        const { answers: savedAnswers, currentModule: savedModule, currentQuestionPage: savedPage, companyData: savedCompany, evidences: savedEvidences } = JSON.parse(saved);
+        setAnswers(savedAnswers);
+        setCurrentModule(savedModule);
+        setCurrentQuestionPage(savedPage);
+        setCompanyData(savedCompany);
+        setEvidences(savedEvidences);
+        alert('✅ Se ha recuperado el progreso guardado. Puedes continuar desde donde lo dejaste.');
+      } catch(e) { console.error(e); }
+    }
+  };
+
+  const saveAnswerOffline = (qId, val) => {
+    const offlineQueue = JSON.parse(localStorage.getItem('offlineQueue') || '[]');
+    offlineQueue.push({ type: 'answer', qId, val, timestamp: Date.now() });
+    localStorage.setItem('offlineQueue', JSON.stringify(offlineQueue));
+  };
+
+  const savePhotoOffline = (qId, photoIndex, file) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const offlineQueue = JSON.parse(localStorage.getItem('offlineQueue') || '[]');
+      offlineQueue.push({ type: 'photo', qId, photoIndex, data: reader.result, timestamp: Date.now() });
+      localStorage.setItem('offlineQueue', JSON.stringify(offlineQueue));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // ========== SINCRONIZACIÓN OFFLINE ==========
+  useEffect(() => {
+    const syncOfflineData = async () => {
+      const queue = JSON.parse(localStorage.getItem('offlineQueue') || '[]');
+      if (queue.length === 0) return;
+      alert('🔄 Conexión recuperada. Sincronizando datos pendientes...');
+      for (const item of queue) {
+        if (item.type === 'answer') {
+          handleAnswer(item.qId, item.val);
+        } else if (item.type === 'photo') {
+          const blob = dataURItoBlob(item.data);
+          const file = new File([blob], `offline_${item.qId}_${item.photoIndex}.jpg`, { type: 'image/jpeg' });
+          await handlePhotoUpload(item.qId, item.photoIndex, file);
+        }
+      }
+      localStorage.removeItem('offlineQueue');
+      alert('✅ Datos sincronizados correctamente.');
+    };
+    window.addEventListener('online', syncOfflineData);
+    return () => window.removeEventListener('online', syncOfflineData);
+  }, []);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // ========== PWA INSTALL ==========
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  }, []);
+
+  const handleInstall = () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then(() => setDeferredPrompt(null));
+    }
+  };
+
+  // ========== HANDLE ANSWER ==========
+  const handleAnswer = (qId, val) => {
+    setAnswers(prev => ({ ...prev, [qId]: val }));
+    saveProgressLocally();
+    if (!navigator.onLine) {
+      saveAnswerOffline(qId, val);
+      alert('📡 Sin conexión. La respuesta se guardará localmente y se sincronizará después.');
+    }
+  };
+
+  // ========== HANDLE PHOTO UPLOAD ==========
+  const handlePhotoUpload = async (qId, photoIndex, fileFromOffline = null) => {
+    const getFileFromInput = () => {
+      return new Promise((resolve) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = (e) => {
+          const file = e.target.files[0];
+          resolve(file);
+        };
+        input.click();
+      });
+    };
+
+    const file = fileFromOffline || (await getFileFromInput());
+    if (!file) return;
+
+    const btn = document.getElementById(`btn-${qId}-${photoIndex}`);
+    if (btn) btn.innerText = 'Subiendo...';
+
+    if (!navigator.onLine) {
+      savePhotoOffline(qId, photoIndex, file);
+      setUploadMessage({ show: true, text: '📡 Sin conexión. La foto se guardará localmente y se subirá después.', type: 'info' });
+      if (btn) btn.innerHTML = '📱 Pendiente';
+      setTimeout(() => setUploadMessage({ show: false, text: '', type: '' }), 2000);
+      return;
+    }
+
+    const fileName = `${companyData.rif || 'temp'}_${qId}_${photoIndex}_${Date.now()}.jpg`;
+    const { error } = await supabase.storage.from('evidencias').upload(fileName, file);
+    if (error) {
+      setUploadMessage({ show: true, text: '❌ Error al subir', type: 'error' });
+      if (btn) btn.innerText = 'Reintentar';
+      setTimeout(() => setUploadMessage({ show: false, text: '', type: '' }), 3000);
+      return;
+    }
+    const { data: publicUrlData } = supabase.storage.from('evidencias').getPublicUrl(fileName);
+    const photoUrl = publicUrlData.publicUrl;
+    const analysis = analyzeImage(qId);
+    setEvidences(prev => {
+      const current = prev[qId] || [];
+      const updated = [...current];
+      updated[photoIndex] = { url: photoUrl, analysis: analysis };
+      return { ...prev, [qId]: updated };
+    });
+    setUploadMessage({ show: true, text: '✅ Archivo guardado', type: 'success' });
+    if (btn) btn.innerHTML = '✓ Foto';
+    setTimeout(() => setUploadMessage({ show: false, text: '', type: '' }), 2000);
+    saveProgressLocally();
   };
 
   // ========== VALIDACIÓN DE DATOS DE EMPRESA ==========
@@ -296,6 +436,16 @@ const App = () => {
   // ========== GUARDAR EN SUPABASE ==========
   const saveRegistrationToSupabase = async () => {
     try {
+      if (!navigator.onLine) {
+        const pendingRegistration = { companyData, answers, evidences, timestamp: Date.now() };
+        localStorage.setItem('pendingRegistration', JSON.stringify(pendingRegistration));
+        alert('Registro guardado localmente. Se enviará cuando haya conexión.');
+        localStorage.removeItem('omnitour_progress');
+        localStorage.removeItem('progress_loaded');
+        setView('results');
+        return;
+      }
+
       const { data: company, error: companyError } = await supabase
         .from('companies')
         .insert({
@@ -324,6 +474,8 @@ const App = () => {
       );
       if (evidencesToInsert.length) await supabase.from('evidences').insert(evidencesToInsert);
       alert('¡Gracias por participar, uno de nuestros especialistas te compartirá los resultados en un reporte que además de mostrarte los niveles de accesibilidad te brindará opciones para mejorarla!');
+      localStorage.removeItem('omnitour_progress');
+      localStorage.removeItem('progress_loaded');
     } catch (error) {
       console.error(error);
       alert('Error al guardar');
@@ -333,9 +485,7 @@ const App = () => {
   // ========== ADMIN (LOGIN LOCAL) ==========
   const handleAdminLogin = (e) => {
     e.preventDefault();
-    const isValid = ADMIN_CREDENTIALS.some(admin => 
-      admin.email === loginEmail && admin.password === loginPassword
-    );
+    const isValid = ADMIN_CREDENTIALS.some(admin => admin.email === loginEmail && admin.password === loginPassword);
     if (isValid) {
       setAdminSession({ email: loginEmail });
       setView('adminDashboard');
@@ -358,66 +508,47 @@ const App = () => {
   };
 
   const buscarEmpresaPorRif = async () => {
-    if (!searchRif.trim()) {
-      alert('Ingrese un RIF válido');
-      return;
-    }
+    if (!searchRif.trim()) { alert('Ingrese un RIF válido'); return; }
     setLoading(true);
     const rifUpper = searchRif.trim().toUpperCase();
-    const { data, error } = await supabase
-      .from('companies')
-      .select('*')
-      .eq('rif', rifUpper)
-      .maybeSingle();
+    const { data, error } = await supabase.from('companies').select('*').eq('rif', rifUpper).maybeSingle();
     setLoading(false);
-    if (error) {
-      console.error(error);
-      setSearchResult({ found: false, rif: rifUpper });
-    } else if (data) {
-      setSearchResult({ found: true, empresa: data });
-    } else {
-      setSearchResult({ found: false, rif: rifUpper });
-    }
+    if (error) setSearchResult({ found: false, rif: rifUpper });
+    else if (data) setSearchResult({ found: true, empresa: data });
+    else setSearchResult({ found: false, rif: rifUpper });
   };
 
-  // ========== FUNCIONES PARA TABLA ADMIN ==========
   const calcularStatsPorEstado = (companies) => {
     const stats = {};
     companies.forEach(emp => {
       if (!emp.address) return;
       const parts = emp.address.split(',');
       const estado = parts.length > 2 ? parts[2].trim() : 'Desconocido';
-      if (!stats[estado]) {
-        stats[estado] = { count: 0, totalPct: 0, sumPct: 0 };
-      }
+      if (!stats[estado]) stats[estado] = { count: 0, sumPct: 0 };
       stats[estado].count++;
       stats[estado].sumPct += emp.total_percentage || 0;
-      stats[estado].totalPct = stats[estado].sumPct / stats[estado].count;
     });
     const statsArray = Object.entries(stats).map(([estado, data]) => ({
       estado,
       cantidad: data.count,
-      promedio: Math.round(data.totalPct)
+      promedio: Math.round(data.sumPct / data.count)
     }));
     setStatsByState(statsArray);
   };
 
   const filtrarPorEstado = (estado) => {
     setSelectedState(estado);
-    if (estado === '') {
-      setFilteredCompanies(allCompanies);
-    } else {
+    if (!estado) setFilteredCompanies(allCompanies);
+    else {
       const filtradas = allCompanies.filter(emp => {
         if (!emp.address) return false;
         const parts = emp.address.split(',');
-        const estadoEmp = parts.length > 2 ? parts[2].trim() : '';
-        return estadoEmp === estado;
+        return parts.length > 2 && parts[2].trim() === estado;
       });
       setFilteredCompanies(filtradas);
     }
   };
 
-  // Exportar a Excel (XLSX)
   const exportToExcel = () => {
     const data = filteredCompanies.map(emp => {
       const parts = emp.address ? emp.address.split(',') : [];
@@ -445,17 +576,6 @@ const App = () => {
     return 'bg-red-500';
   };
 
-  // ========== AGRUPACIÓN DE MÓDULOS PARA EL REPORTE ==========
-  const reportModules = [
-    { name: 'Infraestructura y Entorno Físico', subModules: ['m1-1', 'm1-2', 'm1-3'] },
-    { name: 'Conocimientos y Herramientas para la Atención', subModules: ['m2'] },
-    { name: 'Disponibilidad de Ayudas Técnicas', subModules: ['m3', 'm3-2'] },
-    { name: 'Herramientas Tecnológicas de Apoyo', subModules: ['m4'] },
-    { name: 'Gestión de Emergencias', subModules: ['m5'] }
-  ];
-  const chartColors = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
-
-  // ========== DESCRIPCIÓN DE CATEGORÍAS ==========
   const getCategoryDescription = (name, pct) => {
     if (name === 'Infraestructura y Entorno Físico') {
       if (pct === 0) return `El módulo "${name}" es nulo. No se evidencia accesibilidad. Comenzar desde cero con un diagnóstico detallado y un plan integral.`;
@@ -490,8 +610,8 @@ const App = () => {
     return `Módulo evaluado con ${pct}% de cumplimiento.`;
   };
 
-  // ========== GENERAR PDF CON MÁRGENES 3 CM ==========
-  const generateCompanyReportPDF = async (company) => {
+  // ========== GENERAR REPORTE EN WORD CON ENCABEZADO ==========
+  const generateCompanyReportWord = async (company) => {
     try {
       const { data: respuestas } = await supabase.from('answers').select('*').eq('company_id', company.id);
       if (!respuestas || respuestas.length === 0) {
@@ -529,211 +649,154 @@ const App = () => {
         totalMaxAll += max;
       });
       const totalPct = totalMaxAll === 0 ? 0 : Math.round((totalScoreAll / totalMaxAll) * 100);
-      let nivelTexto = '';
-      if (totalPct >= 85) nivelTexto = 'ORO (Excelente)';
-      else if (totalPct >= 75) nivelTexto = 'PLATA (Muy Bueno)';
-      else if (totalPct >= 60) nivelTexto = 'BRONCE (Bueno)';
-      else if (totalPct >= 50) nivelTexto = 'NORMAL (Básico)';
-      else nivelTexto = 'INACCESIBLE (Crítico)';
+      let nivelTexto = '', trofeoImagen = '';
+      if (totalPct >= 85) { nivelTexto = 'ORO (Excelente)'; trofeoImagen = '/Oro.png'; }
+      else if (totalPct >= 75) { nivelTexto = 'PLATA (Muy Bueno)'; trofeoImagen = '/plata.png'; }
+      else if (totalPct >= 60) { nivelTexto = 'BRONCE (Bueno)'; trofeoImagen = '/Bronce.png'; }
+      else if (totalPct >= 50) { nivelTexto = 'NORMAL (Básico)'; trofeoImagen = '/Normal.png'; }
+      else { nivelTexto = 'INACCESIBLE (Crítico)'; trofeoImagen = '/inaccesibilidad.png'; }
 
-      const trophyImage = getAchievementImage(totalPct);
+      const fetchImageAsArrayBuffer = async (url) => {
+        const res = await fetch(url);
+        return await res.arrayBuffer();
+      };
 
-      const reportDiv = document.createElement('div');
-      reportDiv.style.width = '210mm';
-      reportDiv.style.minHeight = '297mm';
-      reportDiv.style.padding = '30mm';
-      reportDiv.style.backgroundColor = 'white';
-      reportDiv.style.fontFamily = 'Arial, sans-serif';
-      reportDiv.style.position = 'absolute';
-      reportDiv.style.left = '-9999px';
-      reportDiv.style.top = '-9999px';
-      reportDiv.style.boxSizing = 'border-box';
+      const logoOmniBuffer = await fetchImageAsArrayBuffer('/Logo-Omnitours.png');
+      const logoIaetBuffer = await fetchImageAsArrayBuffer('/iaet-logo.png');
+      const trofeoBuffer = await fetchImageAsArrayBuffer(trofeoImagen);
 
-      const styles = `
-        <style>
-          body { margin: 0; padding: 0; }
-          .chart-container { display: inline-block; width: 280px; margin: 15px; text-align: center; vertical-align: top; page-break-inside: avoid; }
-          .flex-wrap { display: flex; flex-wrap: wrap; justify-content: center; }
-          .evidence-item { margin-bottom: 30px; border: 1px solid #ccc; padding: 10px; border-radius: 8px; text-align: center; page-break-inside: avoid; }
-          .evidence-img { max-width: 100%; max-height: 200px; margin: 10px auto; }
-          h1, h2, h3, h4 { margin: 0.5rem 0; }
-          hr { margin: 20px 0; }
-          .nivel-box { display: flex; justify-content: center; align-items: center; gap: 20px; background: #f0fdf4; border-radius: 20px; padding: 15px; margin: 20px 0; page-break-inside: avoid; }
-          .recomendaciones { margin-top: 20px; page-break-inside: avoid; text-align: left; }
-          .firma { margin-top: 40px; text-align: center; }
-          .firma-linea { border-top: 1px solid #ccc; width: 300px; margin: 0 auto; padding-top: 10px; }
-          .descripcion { font-size: 11px; color: #334155; background: #f1f5f9; padding: 8px; border-radius: 12px; margin-top: 8px; text-align: left; }
-          canvas { max-width: 100%; height: auto; }
-        </style>
-      `;
-
-      let chartsHtml = '';
-      groupResults.forEach((group, idx) => {
-        const description = getCategoryDescription(group.name, group.pct);
-        chartsHtml += `
-          <div class="chart-container">
-            <canvas id="chart-${idx}" width="200" height="200" style="width:200px; height:200px;"></canvas>
-            <p style="font-weight: bold; margin: 10px 0 5px;">${group.name}</p>
-            <p style="font-size: 18px; font-weight: bold;">${group.pct}%</p>
-            <div class="descripcion">${description.split('\n').map(p => `<p style="margin:0 0 8px 0;">${p}</p>`).join('')}</div>
-          </div>
-        `;
+      // ========== ENCABEZADO ==========
+      const header = new Header({
+        children: [
+          new Paragraph({
+            children: [
+              new ImageRun({ data: logoOmniBuffer, transformation: { width: 100, height: 50 } }),
+              new TextRun('      '),
+              new ImageRun({ data: logoIaetBuffer, transformation: { width: 50, height: 50 } })
+            ],
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 100 }
+          })
+        ]
       });
 
-      const recommendationsHtml = `
-        <div class="recomendaciones">
-          <h4>Recomendaciones generales</h4>
-          <ul style="text-align: left; margin-left: 20px;">
-            <li>Realizar una auditoría externa especializada en accesibilidad.</li>
-            <li>Crear un comité de accesibilidad con personas con discapacidad.</li>
-            <li>Priorizar mejoras en accesos, sanitarios y comunicación visual.</li>
-            <li>Recibir formación y capacitación en materia de turismo accesible contactar con el IAET</li>
-            <li>El equipo de trabajo requiere capacitación en materia de comunicación con persona con discapacidad, como Lengua de Señas Venezolana, Orientación y Movilidad, entre otros.</li>
-          </ul>
-        </div>
-      `;
+      const sections = [];
 
-      let evidenciasHtml = '';
+      sections.push(
+        new Paragraph({ children: [new TextRun({ text: 'Informe de Accesibilidad Turística', bold: true, size: 26 })], alignment: AlignmentType.CENTER, spacing: { after: 200 } }),
+        new Paragraph({ children: [new TextRun({ text: `Nombre de la Empresa: ${company.name}`, bold: true, size: 22 })], alignment: AlignmentType.CENTER, spacing: { after: 100 } }),
+        new Paragraph({ children: [new TextRun(`RIF: ${company.rif} | RTN: ${company.rtn || 'N/A'} | Sector: ${company.sector}`)], alignment: AlignmentType.CENTER }),
+        new Paragraph({ children: [new TextRun(`Dirección: ${company.address || 'No registrada'} | Teléfono: ${company.phone || 'No registrado'} | Email: ${company.email || 'No registrado'}`)], alignment: AlignmentType.CENTER, spacing: { after: 300 } })
+      );
+
+      sections.push(
+        new Paragraph({ children: [new TextRun({ text: 'La empresa turística se encuentra en el nivel de', bold: true, size: 22 })], alignment: AlignmentType.CENTER }),
+        new Paragraph({ children: [new TextRun({ text: nivelTexto, bold: true, color: "4F46E5", size: 28 })], alignment: AlignmentType.CENTER }),
+        new Paragraph({ children: [new ImageRun({ data: trofeoBuffer, transformation: { width: 120, height: 120 } })], alignment: AlignmentType.CENTER, spacing: { after: 300 } })
+      );
+
+      sections.push(new Paragraph({ children: [new TextRun({ text: 'Resultados por categoría', bold: true, size: 22 })], spacing: { after: 200 } }));
+      for (let i = 0; i < groupResults.length; i++) {
+        const group = groupResults[i];
+        const description = getCategoryDescription(group.name, group.pct);
+        // Generar gráfico circular simple (porcentaje)
+        const canvas = document.createElement('canvas');
+        canvas.width = 200; canvas.height = 200;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, 200, 200);
+        const angulo = (group.pct / 100) * 2 * Math.PI;
+        const start = -Math.PI / 2;
+        const end = start + angulo;
+        ctx.beginPath(); ctx.moveTo(100, 100); ctx.arc(100, 100, 80, 0, 2 * Math.PI); ctx.fillStyle = '#e2e8f0'; ctx.fill();
+        ctx.beginPath(); ctx.moveTo(100, 100); ctx.arc(100, 100, 80, start, end); ctx.fillStyle = '#4f46e5'; ctx.fill();
+        ctx.font = 'bold 18px Arial'; ctx.fillStyle = '#1e293b'; ctx.fillText(`${group.pct}%`, 100, 115);
+        const imgBuffer = await dataURLToArrayBuffer(canvas.toDataURL());
+        sections.push(
+          new Paragraph({ children: [new ImageRun({ data: imgBuffer, transformation: { width: 150, height: 150 } })], alignment: AlignmentType.CENTER, spacing: { after: 50 } }),
+          new Paragraph({ children: [new TextRun({ text: `${group.name}: ${group.pct}%`, bold: true, size: 18 })], alignment: AlignmentType.CENTER, spacing: { after: 100 } }),
+          new Paragraph({ children: [new TextRun(description)], spacing: { after: 200 } })
+        );
+      }
+
+      // Resultado general
+      const canvasGen = document.createElement('canvas');
+      canvasGen.width = 200; canvasGen.height = 200;
+      const ctxGen = canvasGen.getContext('2d');
+      const anguloGen = (totalPct / 100) * 2 * Math.PI;
+      const startGen = -Math.PI / 2;
+      const endGen = startGen + anguloGen;
+      ctxGen.beginPath(); ctxGen.moveTo(100, 100); ctxGen.arc(100, 100, 80, 0, 2 * Math.PI); ctxGen.fillStyle = '#e2e8f0'; ctxGen.fill();
+      ctxGen.beginPath(); ctxGen.moveTo(100, 100); ctxGen.arc(100, 100, 80, startGen, endGen); ctxGen.fillStyle = '#10b981'; ctxGen.fill();
+      ctxGen.font = 'bold 18px Arial'; ctxGen.fillStyle = '#1e293b'; ctxGen.fillText(`${totalPct}%`, 100, 115);
+      const generalImgBuffer = await dataURLToArrayBuffer(canvasGen.toDataURL());
+
+      sections.push(
+        new Paragraph({ children: [new TextRun({ text: 'Resultado General de Accesibilidad', bold: true, size: 22 })], spacing: { after: 200 } }),
+        new Paragraph({ children: [new ImageRun({ data: generalImgBuffer, transformation: { width: 150, height: 150 } })], alignment: AlignmentType.CENTER, spacing: { after: 50 } }),
+        new Paragraph({ children: [new TextRun({ text: `${totalPct}%`, bold: true, size: 24 })], alignment: AlignmentType.CENTER, spacing: { after: 100 } }),
+        new Paragraph({ children: [new TextRun(totalPct >= 85 ? 'Excelente nivel global.' : totalPct >= 70 ? 'Buen nivel, atender áreas identificadas.' : totalPct >= 50 ? 'Nivel básico, plan de mejora urgente.' : 'Nivel crítico, intervención inmediata.')], alignment: AlignmentType.CENTER, spacing: { after: 400 } })
+      );
+
+      // Recomendaciones
+      sections.push(new Paragraph({ children: [new TextRun({ text: 'Recomendaciones generales', bold: true, size: 20 })], spacing: { after: 200 } }));
+      const recs = [
+        'Realizar una auditoría externa especializada en accesibilidad.',
+        'Crear un comité de accesibilidad con personas con discapacidad.',
+        'Priorizar mejoras en accesos, sanitarios y comunicación visual.',
+        'Recibir formación y capacitación en materia de turismo accesible contactar con el IAET',
+        'El equipo de trabajo requiere capacitación en Lengua de Señas Venezolana, Orientación y Movilidad.'
+      ];
+      recs.forEach(rec => sections.push(new Paragraph({ children: [new TextRun(`• ${rec}`)], bullet: { level: 0 }, spacing: { after: 100 } })));
+      sections.push(new Paragraph({ text: '', spacing: { after: 400 } }));
+
+      // Evidencias fotográficas
       if (evidenciasData && evidenciasData.length > 0) {
-        evidenciasHtml = '<h3>Evidencias fotográficas y análisis de IA</h3>';
+        sections.push(new Paragraph({ children: [new TextRun({ text: 'Evidencias fotográficas y análisis de IA', bold: true, size: 20 })], spacing: { after: 200 } }));
         for (const ev of evidenciasData) {
           const questionText = getQuestionText(ev.question_id);
           const photoUrl = ev.photo_urls?.[0] || '';
           const analysis = ev.ai_analysis?.[0] || 'Sin análisis';
-          evidenciasHtml += `
-            <div class="evidence-item">
-              <p><strong>Pregunta asociada:</strong> ${questionText}</p>
-              <img src="${photoUrl}" class="evidence-img" />
-              <p><strong>🤖 Análisis IA:</strong> ${analysis}</p>
-            </div>
-          `;
+          sections.push(new Paragraph({ children: [new TextRun(`Pregunta asociada: ${questionText}`)], spacing: { after: 100 } }));
+          if (photoUrl) {
+            try {
+              const imgBuffer = await fetchImageAsArrayBuffer(photoUrl);
+              sections.push(new Paragraph({ children: [new ImageRun({ data: imgBuffer, transformation: { width: 300, height: 200 } })], alignment: AlignmentType.CENTER, spacing: { after: 100 } }));
+            } catch (err) { sections.push(new Paragraph({ children: [new TextRun('[No se pudo cargar la imagen]')], spacing: { after: 100 } })); }
+          }
+          sections.push(new Paragraph({ children: [new TextRun(`🤖 Análisis IA: ${analysis}`)], spacing: { after: 400 } }));
         }
       } else {
-        evidenciasHtml = '<p>No se cargaron evidencias fotográficas durante el registro.</p>';
+        sections.push(new Paragraph({ children: [new TextRun('No se cargaron evidencias fotográficas durante el registro.')], spacing: { after: 200 } }));
       }
 
-      reportDiv.innerHTML = `
-        ${styles}
-        <div id="pdfContainer">
-          <div style="text-align: center;">
-            <img src="/Logo-Omnitours.png" style="height: 50px;" />
-            <h1>Informe de Accesibilidad Turística</h1>
-            <h2 style="color: #555;">${company.name}</h2>
-            <p><strong>RIF:</strong> ${company.rif} | <strong>RTN:</strong> ${company.rtn || 'N/A'} | <strong>Sector:</strong> ${company.sector}</p>
-            <p><strong>Dirección:</strong> ${company.address || 'No registrada'} | <strong>Teléfono:</strong> ${company.phone || 'No registrado'} | <strong>Email:</strong> ${company.email || 'No registrado'}</p>
-            <hr />
-          </div>
+      // Firma
+      sections.push(new Paragraph({ text: '', spacing: { after: 400 } }));
+      sections.push(new Paragraph({ children: [new TextRun({ text: 'Dr. Juan E. Luján A.', bold: true })], alignment: AlignmentType.CENTER }));
+      sections.push(new Paragraph({ children: [new TextRun('Validador de Accesibilidad Turística')], alignment: AlignmentType.CENTER }));
 
-          <div class="nivel-box">
-            <div style="text-align: center;">
-              <p style="font-size: 18px; font-weight: bold;">La empresa turística se encuentra en el nivel de</p>
-              <p style="font-size: 24px; font-weight: bold; color: #4f46e5;">${nivelTexto}</p>
-            </div>
-            <img src="${trophyImage}" style="height: 80px;" alt="Logro" />
-          </div>
-
-          <h3>Resultados por categoría</h3>
-          <div class="flex-wrap">
-            ${chartsHtml}
-          </div>
-
-          <div style="margin-top: 40px; text-align: center; page-break-inside: avoid;">
-            <h3>Resultado General de Accesibilidad</h3>
-            <canvas id="general-chart" width="250" height="250" style="width:250px; height:250px; margin: 0 auto;"></canvas>
-            <p style="font-size: 20px; font-weight: bold; margin-top: 10px;">${totalPct}%</p>
-            <div style="font-size: 13px; background: #f1f5f9; padding: 12px; border-radius: 16px; max-width: 400px; margin: 15px auto;">
-              ${totalPct >= 85 ? 'Excelente nivel global.' : totalPct >= 70 ? 'Buen nivel, atender áreas identificadas.' : totalPct >= 50 ? 'Nivel básico, plan de mejora urgente.' : 'Nivel crítico, intervención inmediata.'}
-            </div>
-          </div>
-
-          ${recommendationsHtml}
-          <hr />
-          ${evidenciasHtml}
-          <hr />
-          <div class="firma">
-            <div class="firma-linea">
-              <strong>Dr. Juan Luján</strong><br/>Validador de Accesibilidad Turística
-            </div>
-          </div>
-        </div>
-      `;
-
-      document.body.appendChild(reportDiv);
-      await new Promise(r => setTimeout(r, 100));
-
-      const canvasElements = [];
-      for (let i = 0; i < groupResults.length; i++) {
-        const canvas = reportDiv.querySelector(`#chart-${i}`);
-        if (canvas) {
-          const ctx = canvas.getContext('2d');
-          const pct = groupResults[i].pct;
-          if (canvas.chart) canvas.chart.destroy();
-          canvas.chart = new Chart(ctx, {
-            type: 'pie',
-            data: {
-              labels: ['Cumplimiento', 'Pendiente'],
-              datasets: [{ data: [pct, 100 - pct], backgroundColor: [chartColors[i % chartColors.length], '#e2e8f0'], borderWidth: 0 }]
-            },
-            options: { responsive: false, maintainAspectRatio: true, plugins: { legend: { position: 'bottom' } } }
-          });
-          canvasElements.push(canvas.chart);
-        }
-      }
-
-      const generalCanvas = reportDiv.querySelector('#general-chart');
-      if (generalCanvas) {
-        const ctx = generalCanvas.getContext('2d');
-        if (generalCanvas.chart) generalCanvas.chart.destroy();
-        generalCanvas.chart = new Chart(ctx, {
-          type: 'pie',
-          data: {
-            labels: ['Cumplimiento Total', 'Pendiente'],
-            datasets: [{ data: [totalPct, 100 - totalPct], backgroundColor: ['#10b981', '#e2e8f0'], borderWidth: 0 }]
-          },
-          options: { responsive: false, maintainAspectRatio: true, plugins: { legend: { position: 'bottom' } } }
-        });
-        canvasElements.push(generalCanvas.chart);
-      }
-
-      await new Promise(r => setTimeout(r, 200));
-
-      const container = reportDiv.querySelector('#pdfContainer');
-      if (container) {
-        const watermarkDiv = document.createElement('div');
-        watermarkDiv.style.position = 'absolute';
-        watermarkDiv.style.top = '50%';
-        watermarkDiv.style.left = '50%';
-        watermarkDiv.style.transform = 'translate(-50%, -50%)';
-        watermarkDiv.style.opacity = '0.1';
-        watermarkDiv.style.pointerEvents = 'none';
-        watermarkDiv.style.width = '100px';
-        watermarkDiv.innerHTML = '<img src="/iaet-logo.png" style="width: 100%;" />';
-        container.appendChild(watermarkDiv);
-      }
-
-      const canvas = await html2canvas(reportDiv, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const imgWidth = 210;
-      const pageHeight = 297;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      let position = 0;
-      pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
-      let heightLeft = imgHeight;
-      while (heightLeft > pageHeight) {
-        position = heightLeft - pageHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, -position, imgWidth, imgHeight);
-        heightLeft -= pageHeight;
-      }
-      pdf.save(`reporte_${company.rif}.pdf`);
-
-      canvasElements.forEach(chart => chart.destroy());
-      document.body.removeChild(reportDiv);
+      const doc = new Document({
+        sections: [{
+          children: sections,
+          properties: {
+            page: { margin: { top: 2000, bottom: 2000, left: 2000, right: 2000 } },
+            headers: { default: header }
+          }
+        }]
+      });
+      const blob = await Packer.toBlob(doc);
+      saveAs(blob, `reporte_${company.rif}.docx`);
     } catch (error) {
-      console.error('Error generando PDF:', error);
+      console.error('Error generando reporte Word:', error);
       alert('Error al generar el reporte: ' + error.message);
     }
+  };
+
+  const dataURLToArrayBuffer = (dataURL) => {
+    const base64 = dataURL.split(',')[1];
+    const binary = atob(base64);
+    const array = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) array[i] = binary.charCodeAt(i);
+    return array.buffer;
   };
 
   const textSizeStyle = { fontSize: `${fontSizeMultiplier * 1}rem` };
@@ -741,31 +804,48 @@ const App = () => {
   // ========== RENDER PRINCIPAL ==========
   return (
     <div className="flex flex-col h-screen font-sans relative" style={textSizeStyle}>
-      {/* Marca de agua IAET fija y pequeña */}
       <img src="/iaet-logo.png" alt="IAET" style={{ position: 'fixed', bottom: '20px', right: '20px', opacity: 0.15, zIndex: 999, pointerEvents: 'none', width: '30px' }} />
-      
       {uploadMessage.show && (
         <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-4 py-2 rounded-full shadow-lg text-white text-sm font-bold ${uploadMessage.type === 'success' ? 'bg-green-500' : 'bg-red-500'}`}>
           {uploadMessage.text}
         </div>
       )}
-      
-      <header className="bg-white/90 backdrop-blur-md p-4 shadow-sm flex justify-between items-center sticky top-0 z-50 border-b">
-        <img src="/Logo-Omnitours.png" alt="Omnitours" style={{ height: '230px', width: 'auto' }} />
-        <div className="flex gap-2 items-center">
-          <button onClick={increaseFontSize} className="p-1 rounded-full hover:bg-slate-200 active:bg-teal-500"><Type size={18} /></button>
-          <button onClick={decreaseFontSize} className="p-1 rounded-full hover:bg-slate-200 active:bg-teal-500"><Type size={18} /></button>
-          <button onClick={cycleContrastMode} className="p-1 rounded-full hover:bg-slate-200 active:bg-teal-500"><Contrast size={18} /></button>
-          {adminSession ? (
-            <button onClick={logout} className="text-red-500 text-xs flex items-center gap-1 active:bg-teal-500"><LogOut size={16}/> Salir</button>
-          ) : (
-            <button onClick={() => setView('adminLogin')} className="text-indigo-600 text-xs flex items-center gap-1 active:bg-teal-500"><LogIn size={16}/> Administrador</button>
-          )}
-        </div>
-      </header>
+
+<header className="bg-white/90 backdrop-blur-md p-4 shadow-sm flex justify-between items-center sticky top-0 z-50 border-b">
+  <img src="/Logo-Omnitours.png" alt="Omnitours" style={{ height: '230px', width: 'auto' }} />
+  <div className="flex gap-2 items-center flex-wrap">
+    <button onClick={increaseFontSize} className="p-1 rounded-full hover:bg-slate-200 active:bg-teal-500">
+      <Type size={18} />
+    </button>
+    <button onClick={decreaseFontSize} className="p-1 rounded-full hover:bg-slate-200 active:bg-teal-500">
+      <Type size={18} />
+    </button>
+    <button onClick={cycleContrastMode} className="p-1 rounded-full hover:bg-slate-200 active:bg-teal-500">
+      <Contrast size={18} />
+    </button>
+    {adminSession ? (
+      <button onClick={logout} className="text-red-500 text-xs flex items-center gap-1 active:bg-teal-500">
+        <LogOut size={16} /> Salir
+      </button>
+    ) : (
+      <button onClick={() => setView('adminLogin')} className="text-indigo-600 text-xs flex items-center gap-1 active:bg-teal-500">
+        <LogIn size={16} /> Administrador
+      </button>
+    )}
+    {/* Botón de descarga del APK - al final para mejor visibilidad */}
+    <a
+      href="/OmniTour.apk"
+      download
+      className="bg-green-600 text-white px-3 py-1 rounded-lg text-xs font-black active:bg-teal-500 hover:bg-green-700 transition-colors"
+    >
+      📲 Descargar App OmniTour
+    </a>
+  </div>
+</header>
+
 
       <main className="flex-1 overflow-y-auto p-4 pb-32">
-        {/* ========== PANTALLA DE INICIO ========== */}
+        {/* ========== HOME ========== */}
         {view === 'home' && (
           <div className="max-w-md mx-auto space-y-6 pt-8 text-center">
             <h1 className="text-3xl font-black italic uppercase">Sistema de Registro<br/>Omnitours "Turismo para todos"</h1>
@@ -785,315 +865,80 @@ const App = () => {
           </div>
         )}
 
-        {/* REGISTRO (vista registration) */}
+        {/* ========== REGISTRO ========== */}
         {view === 'registration' && (
           <div className="max-w-md mx-auto space-y-6">
             <div className="bg-white p-6 rounded-3xl shadow border">
               <h2 className="text-xl font-black mb-6 flex items-center justify-center gap-2"><Building2 size={24} className="text-indigo-600" /> Datos del Prestador</h2>
               <div className="space-y-4">
-                <div>
-                  <label className="text-[10px] font-black uppercase block text-center">Nombre Comercial *</label>
-                  <input className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-center ${registrationErrors.name ? 'border-red-500' : 'border-slate-200'}`} value={companyData.name} onChange={e => setCompanyData({...companyData, name: e.target.value})} />
-                  {registrationErrors.name && <p className="text-red-500 text-xs text-center mt-1">{registrationErrors.name}</p>}
-                </div>
-                <div>
-                  <label className="text-[10px] font-black uppercase block text-center">RIF * (ej: J-12345678-9)</label>
-                  <input className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-center uppercase ${registrationErrors.rif ? 'border-red-500' : 'border-slate-200'}`} value={companyData.rif} onChange={e => setCompanyData({...companyData, rif: e.target.value})} />
-                  {registrationErrors.rif && <p className="text-red-500 text-xs text-center mt-1">{registrationErrors.rif}</p>}
-                </div>
-                <div><label className="text-[10px] font-black uppercase block text-center">RTN (opcional)</label>
-                <input className="w-full bg-slate-50 border rounded-xl px-4 py-3 text-center" value={companyData.rtn} onChange={e => setCompanyData({...companyData, rtn: e.target.value})} /></div>
-                <div><label className="text-[10px] font-black uppercase block text-center">Teléfono</label>
-                <input type="tel" className="w-full bg-slate-50 border rounded-xl px-4 py-3 text-center" value={companyData.phone} onChange={e => setCompanyData({...companyData, phone: e.target.value})} /></div>
-                <div><label className="text-[10px] font-black uppercase block text-center">Correo electrónico</label>
-                <input type="email" className="w-full bg-slate-50 border rounded-xl px-4 py-3 text-center" value={companyData.email} onChange={e => setCompanyData({...companyData, email: e.target.value})} /></div>
-                <div>
-                  <label className="text-[10px] font-black uppercase block text-center">Estado *</label>
-                  <select className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-center ${registrationErrors.state ? 'border-red-500' : 'border-slate-200'}`} value={companyData.state} onChange={e => setCompanyData({...companyData, state: e.target.value, city: ''})}>
-                    <option value="">Seleccione</option>
-                    {venezuelaStates.map(s => <option key={s}>{s}</option>)}
-                  </select>
-                  {registrationErrors.state && <p className="text-red-500 text-xs text-center mt-1">{registrationErrors.state}</p>}
-                </div>
-                <div>
-                  <label className="text-[10px] font-black uppercase block text-center">Municipio *</label>
-                  <select className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-center ${registrationErrors.city ? 'border-red-500' : 'border-slate-200'}`} value={companyData.city} onChange={e => setCompanyData({...companyData, city: e.target.value})} disabled={!companyData.state}>
-                    <option value="">Seleccione</option>
-                    {(municipalities[companyData.state] || []).map(c => <option key={c}>{c}</option>)}
-                  </select>
-                  {registrationErrors.city && <p className="text-red-500 text-xs text-center mt-1">{registrationErrors.city}</p>}
-                </div>
-                <div>
-                  <label className="text-[10px] font-black uppercase block text-center">Dirección exacta *</label>
-                  <input className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-center ${registrationErrors.address ? 'border-red-500' : 'border-slate-200'}`} value={companyData.address} onChange={e => setCompanyData({...companyData, address: e.target.value})} placeholder="Calle, número, referencia" />
-                  {registrationErrors.address && <p className="text-red-500 text-xs text-center mt-1">{registrationErrors.address}</p>}
-                </div>
-                <div className="rounded-2xl overflow-hidden border h-40 relative bg-slate-100 flex items-center justify-center">
-                  <MapPin size={40} className="text-slate-400" />
-                  <span className="absolute bottom-2 text-xs text-slate-500 text-center px-2">Ubicación: {companyData.address}, {companyData.city}, {companyData.state}</span>
-                </div>
-                <div>
-                  <label className="text-[10px] font-black uppercase block text-center">Sector *</label>
-                  <div className="grid grid-cols-2 gap-3">
-                    {sectors.map(s => (
-                      <button
-                        key={s.id}
-                        onClick={() => setCompanyData({...companyData, sector: s.id})}
-                        className={`relative flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all duration-200 active:scale-95 ${
-                          companyData.sector === s.id
-                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-lg scale-[1.02]'
-                            : 'bg-white text-slate-700 border-slate-200 hover:border-emerald-300 hover:bg-emerald-50'
-                        }`}
-                      >
-                        {companyData.sector === s.id && <CheckCircle2 size={20} className="absolute top-2 right-2 text-white" />}
-                        {s.icon}
-                        <span className="text-[10px] font-black uppercase">{s.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                  {registrationErrors.sector && <p className="text-red-500 text-xs text-center mt-1">{registrationErrors.sector}</p>}
-                </div>
+                <div><label className="text-[10px] font-black uppercase block text-center">Nombre Comercial *</label><input className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-center ${registrationErrors.name ? 'border-red-500' : 'border-slate-200'}`} value={companyData.name} onChange={e => setCompanyData({...companyData, name: e.target.value})} />{registrationErrors.name && <p className="text-red-500 text-xs text-center mt-1">{registrationErrors.name}</p>}</div>
+                <div><label className="text-[10px] font-black uppercase block text-center">RIF * (ej: J-12345678-9)</label><input className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-center uppercase ${registrationErrors.rif ? 'border-red-500' : 'border-slate-200'}`} value={companyData.rif} onChange={e => setCompanyData({...companyData, rif: e.target.value})} />{registrationErrors.rif && <p className="text-red-500 text-xs text-center mt-1">{registrationErrors.rif}</p>}</div>
+                <div><label className="text-[10px] font-black uppercase block text-center">RTN (opcional)</label><input className="w-full bg-slate-50 border rounded-xl px-4 py-3 text-center" value={companyData.rtn} onChange={e => setCompanyData({...companyData, rtn: e.target.value})} /></div>
+                <div><label className="text-[10px] font-black uppercase block text-center">Teléfono</label><input type="tel" className="w-full bg-slate-50 border rounded-xl px-4 py-3 text-center" value={companyData.phone} onChange={e => setCompanyData({...companyData, phone: e.target.value})} /></div>
+                <div><label className="text-[10px] font-black uppercase block text-center">Correo electrónico</label><input type="email" className="w-full bg-slate-50 border rounded-xl px-4 py-3 text-center" value={companyData.email} onChange={e => setCompanyData({...companyData, email: e.target.value})} /></div>
+                <div><label className="text-[10px] font-black uppercase block text-center">Estado *</label><select className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-center ${registrationErrors.state ? 'border-red-500' : 'border-slate-200'}`} value={companyData.state} onChange={e => setCompanyData({...companyData, state: e.target.value, city: ''})}><option value="">Seleccione</option>{venezuelaStates.map(s => <option key={s}>{s}</option>)}</select>{registrationErrors.state && <p className="text-red-500 text-xs text-center mt-1">{registrationErrors.state}</p>}</div>
+                <div><label className="text-[10px] font-black uppercase block text-center">Municipio *</label><select className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-center ${registrationErrors.city ? 'border-red-500' : 'border-slate-200'}`} value={companyData.city} onChange={e => setCompanyData({...companyData, city: e.target.value})} disabled={!companyData.state}><option value="">Seleccione</option>{(municipalities[companyData.state] || []).map(c => <option key={c}>{c}</option>)}</select>{registrationErrors.city && <p className="text-red-500 text-xs text-center mt-1">{registrationErrors.city}</p>}</div>
+                <div><label className="text-[10px] font-black uppercase block text-center">Dirección exacta *</label><input className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-center ${registrationErrors.address ? 'border-red-500' : 'border-slate-200'}`} value={companyData.address} onChange={e => setCompanyData({...companyData, address: e.target.value})} placeholder="Calle, número, referencia" />{registrationErrors.address && <p className="text-red-500 text-xs text-center mt-1">{registrationErrors.address}</p>}</div>
+                <div className="rounded-2xl overflow-hidden border h-40 relative bg-slate-100 flex items-center justify-center"><MapPin size={40} className="text-slate-400" /><span className="absolute bottom-2 text-xs text-slate-500 text-center px-2">Ubicación: {companyData.address}, {companyData.city}, {companyData.state}</span></div>
+                <div><label className="text-[10px] font-black uppercase block text-center">Sector *</label><div className="grid grid-cols-2 gap-3">{sectors.map(s => (<button key={s.id} onClick={() => setCompanyData({...companyData, sector: s.id})} className={`relative flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all duration-200 active:scale-95 ${companyData.sector === s.id ? 'bg-emerald-600 text-white border-emerald-600 shadow-lg scale-[1.02]' : 'bg-white text-slate-700 border-slate-200 hover:border-emerald-300 hover:bg-emerald-50'}`}>{companyData.sector === s.id && <CheckCircle2 size={20} className="absolute top-2 right-2 text-white" />}{s.icon}<span className="text-[10px] font-black uppercase">{s.label}</span></button>))}</div>{registrationErrors.sector && <p className="text-red-500 text-xs text-center mt-1">{registrationErrors.sector}</p>}</div>
               </div>
             </div>
             <button onClick={() => { if (validateCompanyData()) setView('audit'); }} className="w-full py-5 bg-slate-900 text-white rounded-3xl font-black active:bg-teal-500 active:scale-95 flex items-center justify-center gap-2">Continuar Registro <ChevronRight size={20}/></button>
           </div>
         )}
 
-        {/* CUESTIONARIO */}
+        {/* ========== AUDIT ========== */}
         {view === 'audit' && (
-          <div className="max-w-xl mx-auto space-y-6 pb-20">
-            <div className="bg-indigo-600 p-6 rounded-3xl text-white shadow-xl">
-              <span className="text-[10px] font-black">Módulo {currentModule+1}/{registrationModules.length}</span>
-              <h2 className="text-xl font-black">{registrationModules[currentModule].title}</h2>
-              <p className="text-sm">{registrationModules[currentModule].description}</p>
-            </div>
-            {registrationModules[currentModule].questions.map(q => (
-              <div key={q.id} className="bg-white rounded-3xl shadow border p-6">
-                <span className="text-[9px] font-black text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">{q.cat}</span>
-                <p className="text-base font-bold my-4 text-center">{q.text}</p>
-                <div className="grid grid-cols-4 gap-2 mb-4">
-                  {[0,1,2,3].filter(i => i <= q.max).map(i => (
-                    <button
-                      key={i}
-                      onClick={() => handleAnswer(q.id, i)}
-                      className={`py-3 text-sm font-black rounded-xl border transition-all duration-150 flex items-center justify-center gap-1 ${
-                        answers[q.id] === i
-                          ? 'bg-emerald-600 border-emerald-600 text-white shadow-md scale-[1.02]'
-                          : 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200 hover:border-slate-400'
-                      }`}
-                    >
-                      {answers[q.id] === i && <span className="text-base">✓</span>}
-                      {i}
-                    </button>
-                  ))}
+          <>
+            {(() => { if (companyData.rif && !localStorage.getItem('progress_loaded')) { loadProgressLocally(); localStorage.setItem('progress_loaded', 'true'); } return null; })()}
+            <div className="max-w-xl mx-auto space-y-6 pb-20">
+              <div className="bg-indigo-600 p-6 rounded-3xl text-white shadow-xl"><span className="text-[10px] font-black">Módulo {currentModule+1}/{registrationModules.length}</span><h2 className="text-xl font-black">{registrationModules[currentModule].title}</h2><p className="text-sm">{registrationModules[currentModule].description}</p></div>
+              {registrationModules[currentModule].questions.map(q => (
+                <div key={q.id} className="bg-white rounded-3xl shadow border p-6">
+                  <span className="text-[9px] font-black text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">{q.cat}</span>
+                  <p className="text-base font-bold my-4 text-center">{q.text}</p>
+                  <div className="grid grid-cols-4 gap-2 mb-4">{[...Array(q.max+1).keys()].map(i => (<button key={i} onClick={() => handleAnswer(q.id, i)} className={`py-3 text-sm font-black rounded-xl border transition-all duration-150 flex items-center justify-center gap-1 ${answers[q.id] === i ? 'bg-emerald-600 border-emerald-600 text-white shadow-md scale-[1.02]' : 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200 hover:border-slate-400'}`}>{answers[q.id] === i && <span className="text-base">✓</span>}{i}</button>))}</div>
+                  <div className="border-t pt-4"><p className="text-xs font-bold mb-2">Evidencias (máx 3):</p><div className="flex gap-2">{[0,1,2].map(idx => (<button key={idx} id={`btn-${q.id}-${idx}`} onClick={() => handlePhotoUpload(q.id, idx)} className={`px-3 py-1 rounded-lg text-xs font-black active:bg-teal-500 ${evidences[q.id]?.[idx] ? 'bg-green-100' : 'bg-slate-100'}`}><Camera size={14}/> {evidences[q.id]?.[idx] ? 'Foto' : `Subir ${idx+1}`}</button>))}</div></div>
                 </div>
-                <div className="border-t pt-4">
-                  <p className="text-xs font-bold mb-2">Evidencias (máx 3):</p>
-                  <div className="flex gap-2">
-                    {[0,1,2].map(idx => (
-                      <button key={idx} id={`btn-${q.id}-${idx}`} onClick={() => handlePhotoUpload(q.id, idx)} className={`px-3 py-1 rounded-lg text-xs font-black active:bg-teal-500 ${evidences[q.id]?.[idx] ? 'bg-green-100' : 'bg-slate-100'}`}>
-                        <Camera size={14}/> {evidences[q.id]?.[idx] ? 'Foto' : `Subir ${idx+1}`}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+              ))}
+              <div className="flex gap-4 pt-4">
+                {currentModule > 0 && <button onClick={() => { setCurrentModule(m => m-1); saveProgressLocally(); }} className="flex-1 bg-white border py-4 rounded-2xl active:bg-teal-500">← Módulo anterior</button>}
+                {currentModule < registrationModules.length-1 ? (<button onClick={() => { if (isCurrentModuleComplete()) { setCurrentModule(m => m+1); saveProgressLocally(); } }} className="flex-[2] bg-indigo-600 text-white py-4 rounded-2xl active:bg-teal-500">Siguiente módulo →</button>) : (<button onClick={async () => { if (isCurrentModuleComplete()) { await saveRegistrationToSupabase(); setView('results'); } }} className="flex-[2] bg-green-600 text-white py-4 rounded-2xl active:bg-teal-500">Finalizar</button>)}
               </div>
-            ))}
-            <div className="flex gap-4 pt-4">
-              {currentModule > 0 && <button onClick={() => setCurrentModule(m => m-1)} className="flex-1 bg-white border py-4 rounded-2xl active:bg-teal-500">← Módulo anterior</button>}
-              {currentModule < registrationModules.length-1 ? (
-                <button onClick={() => { if (isCurrentModuleComplete()) setCurrentModule(m => m+1); }} className="flex-[2] bg-indigo-600 text-white py-4 rounded-2xl active:bg-teal-500">Siguiente módulo →</button>
-              ) : (
-                <button onClick={async () => { if (isCurrentModuleComplete()) { await saveRegistrationToSupabase(); setView('results'); } }} className="flex-[2] bg-green-600 text-white py-4 rounded-2xl active:bg-teal-500">Finalizar</button>
-              )}
             </div>
-          </div>
+          </>
         )}
 
-        {/* RESULTADOS (pantalla de resultados) */}
+        {/* ========== RESULTADOS ========== */}
         {view === 'results' && (
           <div id="report-content" className="max-w-md mx-auto space-y-6 pb-32">
             <div className="bg-white p-6 rounded-3xl shadow-xl text-center">
               <h2 className="text-2xl font-black">Resultados de Accesibilidad</h2>
               <p className="text-slate-500">{companyData.name}</p>
               <div className="mt-6 space-y-4 text-left">
-                {registrationModules.map(mod => {
-                  const st = getModuleScore(mod.id);
-                  return (
-                    <div key={mod.id}>
-                      <div className="flex justify-between text-sm font-bold"><span>{mod.title}</span><span>{st.pct}%</span></div>
-                      <div className="w-full bg-slate-200 rounded-full h-4"><div className="bg-indigo-600 h-4 rounded-full" style={{ width: `${st.pct}%` }}></div></div>
-                    </div>
-                  );
-                })}
-                <div className="pt-4 border-t mt-4">
-                  <div className="flex justify-between text-lg font-black"><span>Promedio General</span><span>{getTotalStats().pct}%</span></div>
-                  <div className="w-full bg-slate-200 rounded-full h-6 mt-2"><div className={`h-6 rounded-full ${getTotalStats().pct >= 50 ? 'bg-green-500' : 'bg-red-500'}`} style={{ width: `${getTotalStats().pct}%` }}></div></div>
-                </div>
+                {registrationModules.map(mod => { const st = getModuleScore(mod.id); return (<div key={mod.id}><div className="flex justify-between text-sm font-bold"><span>{mod.title}</span><span>{st.pct}%</span></div><div className="w-full bg-slate-200 rounded-full h-4"><div className="bg-indigo-600 h-4 rounded-full" style={{ width: `${st.pct}%` }}></div></div></div>); })}
+                <div className="pt-4 border-t mt-4"><div className="flex justify-between text-lg font-black"><span>Promedio General</span><span>{getTotalStats().pct}%</span></div><div className="w-full bg-slate-200 rounded-full h-6 mt-2"><div className={`h-6 rounded-full ${getTotalStats().pct >= 50 ? 'bg-green-500' : 'bg-red-500'}`} style={{ width: `${getTotalStats().pct}%` }}></div></div></div>
                 <div className="flex justify-center mt-4"><img src={getAchievementImage(getTotalStats().pct)} className="w-40 h-auto rounded-lg shadow" alt="Logro" /></div>
               </div>
             </div>
           </div>
         )}
 
-        {/* ADMIN LOGIN */}
+        {/* ========== ADMIN LOGIN ========== */}
         {view === 'adminLogin' && (
-          <div className="max-w-md mx-auto mt-20 bg-white p-8 rounded-2xl shadow-xl">
-            <h2 className="text-2xl font-black mb-6 text-center">Acceso Administrador</h2>
-            <form onSubmit={handleAdminLogin}>
-              <input type="email" placeholder="Email" className="w-full p-3 border rounded-xl mb-4" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} required />
-              <input type="password" placeholder="Contraseña" className="w-full p-3 border rounded-xl mb-6" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} required />
-              <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-xl font-black active:bg-teal-500">Ingresar</button>
-            </form>
-          </div>
+          <div className="max-w-md mx-auto mt-20 bg-white p-8 rounded-2xl shadow-xl"><h2 className="text-2xl font-black mb-6 text-center">Acceso Administrador</h2><form onSubmit={handleAdminLogin}><input type="email" placeholder="Email" className="w-full p-3 border rounded-xl mb-4" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} required /><input type="password" placeholder="Contraseña" className="w-full p-3 border rounded-xl mb-6" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} required /><button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-xl font-black active:bg-teal-500">Ingresar</button></form></div>
         )}
 
-        {/* ADMIN DASHBOARD CON TABLA Y FILTROS (con numeración) */}
+        {/* ========== ADMIN DASHBOARD ========== */}
         {view === 'adminDashboard' && (
           <div className="max-w-7xl mx-auto">
-            <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
-              <h2 className="text-2xl font-black">Panel de Administrador</h2>
-              <div className="flex gap-2">
-                <button onClick={() => setView('home')} className="bg-slate-200 px-4 py-2 rounded-xl text-sm font-black active:bg-teal-500">← Volver al inicio</button>
-                <button onClick={logout} className="bg-red-100 text-red-700 px-4 py-2 rounded-xl text-sm font-black active:bg-teal-500">Cerrar sesión</button>
-              </div>
-            </div>
-
-            {/* Resumen por estado */}
-            <div className="bg-white rounded-2xl shadow p-6 mb-8">
-              <h3 className="text-xl font-black mb-4 flex items-center gap-2"><BarChart size={24} className="text-indigo-600"/> Resumen por estado</h3>
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Empresas</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Promedio accesibilidad</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {statsByState.map((stat, idx) => (
-                      <tr key={idx} className="hover:bg-gray-50 cursor-pointer" onClick={() => filtrarPorEstado(stat.estado)}>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{stat.estado}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{stat.cantidad}</td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center gap-2">
-                            <div className="w-24 bg-gray-200 rounded-full h-2">
-                              <div className={`h-2 rounded-full ${getPctColor(stat.promedio)}`} style={{ width: `${stat.promedio}%` }}></div>
-                            </div>
-                            <span className="text-sm font-bold">{stat.promedio}%</span>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Buscador por RIF */}
-            <div className="bg-white p-6 rounded-2xl shadow mb-6">
-              <h3 className="text-lg font-black mb-4">Generar reporte por empresa</h3>
-              <div className="flex flex-col sm:flex-row gap-3">
-                <input type="text" placeholder="Ingrese RIF de la empresa" className="flex-1 border rounded-xl px-4 py-3 text-center uppercase" value={searchRif} onChange={(e) => setSearchRif(e.target.value.toUpperCase())} />
-                <button onClick={buscarEmpresaPorRif} disabled={loading} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black active:bg-teal-500 disabled:opacity-50">{loading ? 'Buscando...' : 'Buscar empresa'}</button>
-              </div>
-              {searchResult && (
-                <div className="mt-4 p-4 border rounded-xl bg-slate-50">
-                  {searchResult.found ? (
-                    <div className="flex justify-between items-center flex-wrap gap-2">
-                      <div>
-                        <p className="font-bold">{searchResult.empresa.name}</p>
-                        <p className="text-xs text-slate-500">RIF: {searchResult.empresa.rif} | Score: {searchResult.empresa.total_percentage}%</p>
-                        <p className="text-xs text-slate-400">Dirección: {searchResult.empresa.address}</p>
-                      </div>
-                      <button onClick={() => generateCompanyReportPDF(searchResult.empresa)} className="bg-green-600 text-white px-4 py-2 rounded-xl text-sm font-black active:bg-teal-500">📄 Generar reporte PDF</button>
-                    </div>
-                  ) : (
-                    <p className="text-red-500 font-bold">❌ La empresa con RIF {searchResult.rif} no se ha registrado.</p>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Tabla de empresas con numeración automática */}
-            <div className="bg-white rounded-2xl shadow p-6">
-              <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
-                <h3 className="text-lg font-black">Listado de empresas registradas</h3>
-                <div className="flex gap-3">
-                  <select 
-                    value={selectedState} 
-                    onChange={(e) => filtrarPorEstado(e.target.value)} 
-                    className="border rounded-xl px-4 py-2 text-sm font-black bg-white"
-                  >
-                    <option value="">Todos los estados</option>
-                    {venezuelaStates.map(state => (
-                      <option key={state} value={state}>{state}</option>
-                    ))}
-                  </select>
-                  <button onClick={exportToExcel} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-black flex items-center gap-2 active:bg-teal-500">
-                    <Download size={16}/> Exportar Excel
-                  </button>
-                </div>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Empresa</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">RIF</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sector</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Accesibilidad</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fecha</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Acción</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {filteredCompanies.length === 0 ? (
-                      <tr>
-                        <td colSpan="8" className="px-4 py-8 text-center text-gray-500">No hay empresas registradas en este estado.</td>
-                      </tr>
-                    ) : (
-                      filteredCompanies.map((emp, index) => {
-                        const parts = emp.address ? emp.address.split(',') : [];
-                        const estado = parts.length > 2 ? parts[2].trim() : 'No especificado';
-                        return (
-                          <tr key={emp.id} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 font-bold">{index + 1}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{emp.name}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{emp.rif}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{emp.sector}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{estado}</td>
-                            <td className="px-4 py-3 whitespace-nowrap">
-                              <div className="flex items-center gap-2">
-                                <div className="w-20 bg-gray-200 rounded-full h-2">
-                                  <div className={`h-2 rounded-full ${getPctColor(emp.total_percentage || 0)}`} style={{ width: `${emp.total_percentage || 0}%` }}></div>
-                                </div>
-                                <span className="text-sm font-bold">{emp.total_percentage || 0}%</span>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{new Date(emp.created_at).toLocaleDateString()}</td>
-                            <td className="px-4 py-3 whitespace-nowrap">
-                              <button onClick={() => generateCompanyReportPDF(emp)} className="bg-indigo-600 text-white px-3 py-1 rounded-lg text-xs font-black hover:bg-indigo-700 active:bg-teal-500">📄 Reporte</button>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              <div className="mt-4 text-sm text-gray-500">
-                Total empresas registradas: {filteredCompanies.length}
-              </div>
-            </div>
+            <div className="flex justify-between items-center mb-6 flex-wrap gap-4"><h2 className="text-2xl font-black">Panel de Administrador</h2><div className="flex gap-2"><button onClick={() => setView('home')} className="bg-slate-200 px-4 py-2 rounded-xl text-sm font-black active:bg-teal-500">← Volver al inicio</button><button onClick={logout} className="bg-red-100 text-red-700 px-4 py-2 rounded-xl text-sm font-black active:bg-teal-500">Cerrar sesión</button></div></div>
+            <div className="bg-white rounded-2xl shadow p-6 mb-8"><h3 className="text-xl font-black mb-4 flex items-center gap-2"><BarChart size={24} className="text-indigo-600"/> Resumen por estado</h3><div className="overflow-x-auto"><table className="min-w-full divide-y divide-gray-200"><thead className="bg-gray-50"><tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Empresas</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Promedio accesibilidad</th></tr></thead><tbody className="bg-white divide-y divide-gray-200">{statsByState.map((stat, idx) => (<tr key={idx} className="hover:bg-gray-50 cursor-pointer" onClick={() => filtrarPorEstado(stat.estado)}><td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{stat.estado}</td><td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{stat.cantidad}</td><td className="px-6 py-4 whitespace-nowrap"><div className="flex items-center gap-2"><div className="w-24 bg-gray-200 rounded-full h-2"><div className={`h-2 rounded-full ${getPctColor(stat.promedio)}`} style={{ width: `${stat.promedio}%` }}></div></div><span className="text-sm font-bold">{stat.promedio}%</span></div></td></tr>))}</tbody></table></div></div>
+            <div className="bg-white p-6 rounded-2xl shadow mb-6"><h3 className="text-lg font-black mb-4">Generar reporte por empresa</h3><div className="flex flex-col sm:flex-row gap-3"><input type="text" placeholder="Ingrese RIF de la empresa" className="flex-1 border rounded-xl px-4 py-3 text-center uppercase" value={searchRif} onChange={(e) => setSearchRif(e.target.value.toUpperCase())} /><button onClick={buscarEmpresaPorRif} disabled={loading} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black active:bg-teal-500 disabled:opacity-50">{loading ? 'Buscando...' : 'Buscar empresa'}</button></div>{searchResult && (<div className="mt-4 p-4 border rounded-xl bg-slate-50">{searchResult.found ? (<div className="flex justify-between items-center flex-wrap gap-2"><div><p className="font-bold">{searchResult.empresa.name}</p><p className="text-xs text-slate-500">RIF: {searchResult.empresa.rif} | Score: {searchResult.empresa.total_percentage}%</p><p className="text-xs text-slate-400">Dirección: {searchResult.empresa.address}</p></div><button onClick={() => generateCompanyReportWord(searchResult.empresa)} className="bg-green-600 text-white px-4 py-2 rounded-xl text-sm font-black active:bg-teal-500">📄 Generar reporte Word</button></div>) : (<p className="text-red-500 font-bold">❌ La empresa con RIF {searchResult.rif} no se ha registrado.</p>)}</div>)}</div>
+            <div className="bg-white rounded-2xl shadow p-6"><div className="flex justify-between items-center mb-6 flex-wrap gap-4"><h3 className="text-lg font-black">Listado de empresas registradas</h3><div className="flex gap-3"><select value={selectedState} onChange={(e) => filtrarPorEstado(e.target.value)} className="border rounded-xl px-4 py-2 text-sm font-black bg-white"><option value="">Todos los estados</option>{venezuelaStates.map(state => (<option key={state} value={state}>{state}</option>))}</select><button onClick={exportToExcel} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-black flex items-center gap-2 active:bg-teal-500"><Download size={16}/> Exportar Excel</button></div></div><div className="overflow-x-auto"><table className="min-w-full divide-y divide-gray-200"><thead className="bg-gray-50"><tr><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Empresa</th><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">RIF</th><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sector</th><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Accesibilidad</th><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fecha</th><th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Acción</th></tr></thead><tbody className="bg-white divide-y divide-gray-200">{filteredCompanies.length === 0 ? (<tr><td colSpan="8" className="px-4 py-8 text-center text-gray-500">No hay empresas registradas en este estado.</td></tr>) : (filteredCompanies.map((emp, index) => { const parts = emp.address ? emp.address.split(',') : []; const estado = parts.length > 2 ? parts[2].trim() : 'No especificado'; return (<tr key={emp.id} className="hover:bg-gray-50"><td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 font-bold">{index+1}</td><td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{emp.name}</td><td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{emp.rif}</td><td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{emp.sector}</td><td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{estado}</td><td className="px-4 py-3 whitespace-nowrap"><div className="flex items-center gap-2"><div className="w-20 bg-gray-200 rounded-full h-2"><div className={`h-2 rounded-full ${getPctColor(emp.total_percentage || 0)}`} style={{ width: `${emp.total_percentage || 0}%` }}></div></div><span className="text-sm font-bold">{emp.total_percentage || 0}%</span></div></td><td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{new Date(emp.created_at).toLocaleDateString()}</td><td className="px-4 py-3 whitespace-nowrap"><button onClick={() => generateCompanyReportWord(emp)} className="bg-indigo-600 text-white px-3 py-1 rounded-lg text-xs font-black hover:bg-indigo-700 active:bg-teal-500">📄 Reporte Word</button></td></tr>); }))}</tbody></table></div><div className="mt-4 text-sm text-gray-500">Total empresas registradas: {filteredCompanies.length}</div></div>
           </div>
         )}
       </main>
-
-      {/* Navegación inferior */}
       {(view === 'home' || view === 'registration' || view === 'audit' || view === 'results') && (
         <nav className="bg-white/90 backdrop-blur-xl border-t fixed bottom-0 w-full flex justify-around items-center h-24 px-8 pb-6 shadow-lg z-50">
           <button onClick={() => setView('home')} className={`flex flex-col items-center gap-1.5 active:bg-teal-500 active:rounded-full active:p-1 ${view === 'home' ? 'text-indigo-600' : 'text-slate-300'}`}><LayoutDashboard size={24} /><span className="text-[9px] font-black">Inicio</span></button>
