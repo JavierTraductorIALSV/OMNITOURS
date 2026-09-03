@@ -5,7 +5,8 @@ import {
   Eye, Ear, Brain, Smartphone, ShieldAlert, FileText, Navigation,
   Globe, Umbrella, ChevronRight, Info, ShieldCheck, TrendingUp, Camera,
   LogIn, LogOut, Type, Contrast, CheckCircle2, Download, BarChart,
-  HelpCircle, Award, Users, Shield, UserPlus, Trash2, Edit, AlertTriangle
+  HelpCircle, Award, Users, Shield, UserPlus, Trash2, Edit,
+  AlertTriangle
 } from 'lucide-react';
 import { supabase } from './supabaseClient';
 import * as XLSX from 'xlsx';
@@ -16,7 +17,6 @@ import { Document, Packer, Paragraph, TextRun, ImageRun, AlignmentType, Header }
 // CONFIGURACIÓN DE MÓDULOS POR SECTOR
 // ============================================
 
-// Módulos base (comunes a casi todos los sectores)
 const baseModules = [
   { id: 'm1-1', title: 'Acceso y Circulación', description: 'Escala: 0 (No Cumple) / 1 (Parcial) / 2 (Cumple)', questions: [
     { id: 'm1_1', text: 'Acceso: ¿Existen rampas con pendiente adecuada (máx. 6-8%) y pasamanos?', cat: 'Motora', max: 2 },
@@ -78,10 +78,6 @@ const baseModules = [
   ]}
 ];
 
-// ============================================
-// PREGUNTAS ESPECÍFICAS POR SECTOR
-// ============================================
-
 const sectorSpecificQuestions = {
   restaurante: [
     { id: 'R-ESP-01', text: 'Menú Especial: ¿Ofrece un menú especial para personas con celiaquía o alergias alimentarias, con opciones claramente identificadas y sin riesgo de contaminación cruzada?', cat: 'Neurodiversidad', max: 2 },
@@ -139,7 +135,6 @@ const sectorSpecificQuestions = {
   ]
 };
 
-// Módulos que aplican a cada sector (según documento)
 const sectorModulesConfig = {
   alojamiento: ['m1-1', 'm1-2', 'm1-3', 'm2', 'm3', 'm3-2', 'm4', 'm5'],
   restaurante: ['m1-1', 'm1-2', 'm1-3', 'm2', 'm3', 'm3-2', 'm4', 'm5'],
@@ -151,7 +146,6 @@ const sectorModulesConfig = {
   playa: ['m1-1', 'm2', 'm5']
 };
 
-// Función para obtener los módulos de un sector (con preguntas específicas)
 const getModulesBySector = (sectorId) => {
   if (!sectorId) return [];
   const moduleIds = sectorModulesConfig[sectorId] || [];
@@ -174,7 +168,7 @@ const getModulesBySector = (sectorId) => {
 };
 
 // ============================================
-// Función auxiliar para dataURI a Blob
+// FUNCIONES AUXILIARES
 // ============================================
 const dataURItoBlob = (dataURI) => {
   const byteString = atob(dataURI.split(',')[1]);
@@ -187,11 +181,13 @@ const dataURItoBlob = (dataURI) => {
   return new Blob([ab], { type: mimeString });
 };
 
-// ============================================
-// ID DEL ADMINISTRADOR (para el modo demo)
-// ============================================
-const ADMIN_ID = 'f0f6263c-7d1c-4e72-80bb-b3a8d070b1a5';
-const ADMIN_EMAIL = 'javier.investigacionlsv@gmail.com';
+const dataURLToArrayBuffer = (dataURL) => {
+  const base64 = dataURL.split(',')[1];
+  const binary = atob(base64);
+  const array = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) array[i] = binary.charCodeAt(i);
+  return array.buffer;
+};
 
 // ============================================
 // COMPONENTE PRINCIPAL
@@ -281,59 +277,66 @@ const App = () => {
     { id: 'playa', label: 'Servicios de Playa', icon: <Umbrella size={24} />, description: 'Balnearios, servicios playeros' },
   ];
 
-  // ========== FUNCIONES DE AUTENTICACIÓN (CON MODO DEMO FORZADO) ==========
+  // ============================================================
+  // AUTENTICACIÓN ROBUSTA CON TIMEOUT
+  // ============================================================
   useEffect(() => {
-    // 🔥 MODO DEMO FORZADO - SALTAR AUTENTICACIÓN REAL
-    // Cambia esta variable a false cuando quieras usar autenticación real
-    const forceDemoMode = false;
-    
-    if (forceDemoMode) {
-      const fakeUser = {
-        id: ADMIN_ID,
-        email: ADMIN_EMAIL,
-        user_metadata: { role: 'admin' }
-      };
-      setUser(fakeUser);
-      setUserRole('admin');
-      setSession({ user: fakeUser });
-      setLoading(false);
-      setView('adminDashboard');
-      // Cargar empresas y usuarios en segundo plano
-      setTimeout(() => {
-        cargarEmpresas(ADMIN_ID);
-        cargarUsuarios();
-      }, 100);
-      return;
-    }
+    let isMounted = true;
+    let timeoutId = null;
 
-    // ========== AUTENTICACIÓN REAL (solo si forceDemoMode = false) ==========
     const getSession = async () => {
       try {
-        const { data: { session }, error } = await supabase.auth.getSession();
+        // Timeout de 10 segundos
+        const timeoutPromise = new Promise((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error('Timeout de conexión con Supabase')), 10000);
+        });
+
+        const sessionPromise = supabase.auth.getSession();
+        const { data: { session }, error } = await Promise.race([sessionPromise, timeoutPromise]);
+
+        clearTimeout(timeoutId);
+
         if (error) {
           console.error('Error obteniendo sesión:', error);
-          setLoading(false);
+          if (isMounted) {
+            setLoading(false);
+            alert('Error de conexión con el servidor. Revisa tu internet y recarga.');
+          }
           return;
         }
         if (session) {
           setSession(session);
           setUser(session.user);
-          await obtenerRol(session.user.id);
+          try {
+            await obtenerRol(session.user.id);
+          } catch (roleError) {
+            console.error('Error al obtener rol:', roleError);
+            setUserRole('user');
+          }
         }
-        setLoading(false);
+        if (isMounted) setLoading(false);
       } catch (error) {
+        clearTimeout(timeoutId);
         console.error('Error en autenticación:', error);
-        setLoading(false);
+        if (isMounted) {
+          setLoading(false);
+          alert('Error de conexión con Supabase. Verifica tu conexión a internet.');
+        }
       }
     };
-    
+
     getSession();
 
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN') {
         setSession(session);
         setUser(session.user);
-        await obtenerRol(session.user.id);
+        try {
+          await obtenerRol(session.user.id);
+        } catch (roleError) {
+          console.error('Error al obtener rol en cambio de estado:', roleError);
+          setUserRole('user');
+        }
         setView('home');
       } else if (event === 'SIGNED_OUT') {
         setSession(null);
@@ -341,26 +344,50 @@ const App = () => {
         setUserRole(null);
         setView('home');
       }
-      setLoading(false);
+      if (isMounted) setLoading(false);
     });
 
-    return () => authListener?.subscription?.unsubscribe();
+    return () => {
+      isMounted = false;
+      clearTimeout(timeoutId);
+      authListener?.subscription?.unsubscribe();
+    };
   }, []);
 
   const obtenerRol = async (userId) => {
     try {
-      const { data } = await supabase
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Timeout al obtener perfil')), 5000)
+      );
+      const queryPromise = supabase
         .from('profiles')
         .select('role')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
+
+      const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
+
+      if (error) {
+        console.error('Error al obtener rol:', error);
+        setUserRole('user');
+        return;
+      }
       if (data) {
         setUserRole(data.role);
       } else {
+        // Crear perfil automáticamente
+        const { error: insertError } = await supabase
+          .from('profiles')
+          .insert({ id: userId, email: user?.email || '', role: 'user' });
+        if (insertError) {
+          console.error('Error al crear perfil automático:', insertError);
+        } else {
+          console.log('Perfil creado automáticamente');
+        }
         setUserRole('user');
       }
     } catch (error) {
-      console.error('Error obteniendo rol:', error);
+      console.error('Error en obtenerRol:', error);
       setUserRole('user');
     }
   };
@@ -389,21 +416,9 @@ const App = () => {
     await supabase.auth.signOut();
   };
 
-  // ========== ACCESO ADMIN DEMO (DIRECTO) ==========
-  const handleAdminDemoLogin = async () => {
-    const fakeUser = {
-      id: ADMIN_ID,
-      email: ADMIN_EMAIL,
-      user_metadata: { role: 'admin' }
-    };
-    setUser(fakeUser);
-    setUserRole('admin');
-    setSession({ user: fakeUser });
-    await cargarEmpresas(ADMIN_ID);
-    await cargarUsuarios();
-    setView('adminDashboard');
-  };
-
+  // ============================================================
+  // ADMIN: GESTIÓN DE USUARIOS
+  // ============================================================
   const handleRegisterUser = async (e) => {
     e.preventDefault();
     if (!newUserEmail || !newUserPassword) {
@@ -456,379 +471,73 @@ const App = () => {
 
   const eliminarUsuario = async (userId) => {
     if (userRole !== 'admin') return;
-    if (!window.confirm('¿Eliminar este usuario? También se eliminarán sus empresas.')) return;
-    const { error } = await supabase
-      .from('profiles')
-      .delete()
-      .eq('id', userId);
-    if (error) {
-      alert('Error al eliminar usuario: ' + error.message);
-    } else {
-      await cargarUsuarios();
-    }
-  };
-
-  // ========== CONFIGURACIÓN DE CONTRASTE ==========
-  useEffect(() => {
-    document.body.className = contrastMode;
-    const style = document.createElement('style');
-    style.id = 'contrast-styles';
-    style.innerHTML = `
-      body.high-dark, body.high-dark * { background-color: #000000 !important; color: #facc15 !important; border-color: #facc15 !important; }
-      body.high-light, body.high-light * { background-color: #ffffff !important; color: #000000 !important; border-color: #000000 !important; }
-      body.high-impact, body.high-impact * { background-color: #000000 !important; color: #ffeb3b !important; border-color: #ffeb3b !important; }
-      body.high-dark button, body.high-dark input, body.high-dark select, body.high-dark textarea { background-color: #111 !important; border-color: #facc15 !important; color: #facc15 !important; }
-      body.high-light button, body.high-light input, body.high-light select, body.high-light textarea { background-color: #eee !important; border-color: #000 !important; color: #000 !important; }
-      body.high-impact button, body.high-impact input, body.high-impact select, body.high-impact textarea { background-color: #222 !important; border-color: #ffeb3b !important; color: #ffeb3b !important; }
-    `;
-    if (!document.getElementById('contrast-styles')) document.head.appendChild(style);
-    return () => document.getElementById('contrast-styles')?.remove();
-  }, [contrastMode]);
-
-  const cycleContrastMode = () => {
-    const modes = ['normal-contrast', 'high-dark', 'high-light', 'high-impact'];
-    const currentIndex = modes.indexOf(contrastMode);
-    const nextIndex = (currentIndex + 1) % modes.length;
-    setContrastMode(modes[nextIndex]);
-    document.body.className = modes[nextIndex];
-  };
-
-  const increaseFontSize = () => setFontSizeMultiplier(v => Math.min(v + 0.1, 1.5));
-  const decreaseFontSize = () => setFontSizeMultiplier(v => Math.max(v - 0.1, 0.8));
-
-  // ========== FUNCIONES DE PUNTUACIÓN ==========
-  const getModuleScore = (moduleId) => {
-    const mod = getCurrentModules().find(m => m.id === moduleId);
-    if (!mod) return { score: 0, max: 1, pct: 0 };
-    let score = 0, max = 0;
-    mod.questions.forEach(q => {
-      score += (answers[q.id] || 0);
-      max += q.max;
-    });
-    return { score, max, pct: Math.round((score / max) * 100) || 0 };
-  };
-
-  const getTotalStats = () => {
-    const modules = getCurrentModules();
-    let totalScore = 0, totalMax = 0;
-    modules.forEach(m => {
-      const s = getModuleScore(m.id);
-      totalScore += s.score;
-      totalMax += s.max;
-    });
-    const pct = totalMax === 0 ? 0 : Math.round((totalScore / totalMax) * 100);
-    return { score: totalScore, max: totalMax, pct };
-  };
-
-  const getCurrentModules = () => {
-    if (registrationModules.length > 0) return registrationModules;
-    if (companyData.sector) {
-      const mods = getModulesBySector(companyData.sector);
-      setRegistrationModules(mods);
-      return mods;
-    }
-    return [];
-  };
-
-  const getAchievementImage = (pct) => {
-    if (pct >= 85) return '/Oro.png';
-    if (pct >= 75) return '/plata.png';
-    if (pct >= 60) return '/Bronce.png';
-    if (pct >= 50) return '/Normal.png';
-    return '/inaccesibilidad.png';
-  };
-
-  const isCurrentModuleComplete = () => {
-    const modules = getCurrentModules();
-    if (modules.length === 0) return false;
-    const currentMod = modules[currentModule];
-    if (!currentMod) return false;
-    const missingQuestions = currentMod.questions.filter(q => answers[q.id] === undefined);
-    if (missingQuestions.length > 0) {
-      const missingList = missingQuestions.map((q, idx) => `${idx + 1}. ${q.text}`).join('\n');
-      alert(`❌ Faltan ${missingQuestions.length} pregunta(s) por responder en este módulo:\n\n${missingList}`);
-      return false;
-    }
-    return true;
-  };
-
-  // ========== SUBIR FOTOS ==========
-  const getQuestionText = (qId) => {
-    const modules = getCurrentModules();
-    for (let mod of modules) {
-      const q = mod.questions.find(q => q.id === qId);
-      if (q) return q.text;
-    }
-    return '';
-  };
-
-  const analyzeImage = (qId) => {
-    const questionText = getQuestionText(qId).toLowerCase();
-    const keywords = ['rampa', 'pasamanos', 'ancho', 'sanitario', 'mobiliario', 'braille', 'iluminación', 'alarma', 'acústica'];
-    const found = keywords.filter(k => questionText.includes(k));
-    if (found.length === 0) return "Análisis no concluyente. Se requiere inspección manual.";
-    return `Se detectan elementos relacionados con: ${found.join(', ')}. La evidencia visual sugiere ${Math.random() > 0.5 ? 'cumplimiento parcial' : 'necesidad de mejora'}.`;
-  };
-
-  // ========== GUARDADO LOCAL Y PROGRESO ==========
-  const saveProgressLocally = () => {
-    const progress = {
-      answers,
-      currentModule,
-      currentQuestionPage,
-      companyData,
-      evidences,
-      timestamp: Date.now()
-    };
-    localStorage.setItem('omnitour_progress', JSON.stringify(progress));
-  };
-
-  const loadProgressLocally = () => {
-    const saved = localStorage.getItem('omnitour_progress');
-    if (saved) {
-      try {
-        const { answers: savedAnswers, currentModule: savedModule, currentQuestionPage: savedPage, companyData: savedCompany, evidences: savedEvidences } = JSON.parse(saved);
-        setAnswers(savedAnswers);
-        setCurrentModule(savedModule);
-        setCurrentQuestionPage(savedPage);
-        setCompanyData(savedCompany);
-        setEvidences(savedEvidences);
-        if (savedCompany.sector) {
-          const mods = getModulesBySector(savedCompany.sector);
-          setRegistrationModules(mods);
-        }
-        alert('✅ Se ha recuperado el progreso guardado.');
-      } catch(e) { console.error(e); }
-    }
-  };
-
-  const saveAnswerOffline = (qId, val) => {
-    const offlineQueue = JSON.parse(localStorage.getItem('offlineQueue') || '[]');
-    offlineQueue.push({ type: 'answer', qId, val, timestamp: Date.now() });
-    localStorage.setItem('offlineQueue', JSON.stringify(offlineQueue));
-  };
-
-  const savePhotoOffline = (qId, photoIndex, file) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const offlineQueue = JSON.parse(localStorage.getItem('offlineQueue') || '[]');
-      offlineQueue.push({ type: 'photo', qId, photoIndex, data: reader.result, timestamp: Date.now() });
-      localStorage.setItem('offlineQueue', JSON.stringify(offlineQueue));
-    };
-    reader.readAsDataURL(file);
-  };
-
-  // ========== SINCRONIZACIÓN OFFLINE ==========
-  useEffect(() => {
-    const syncOfflineData = async () => {
-      const queue = JSON.parse(localStorage.getItem('offlineQueue') || '[]');
-      if (queue.length === 0) return;
-      alert('🔄 Conexión recuperada. Sincronizando datos pendientes...');
-      for (const item of queue) {
-        if (item.type === 'answer') {
-          handleAnswer(item.qId, item.val);
-        } else if (item.type === 'photo') {
-          const blob = dataURItoBlob(item.data);
-          const file = new File([blob], `offline_${item.qId}_${item.photoIndex}.jpg`, { type: 'image/jpeg' });
-          await handlePhotoUpload(item.qId, item.photoIndex, file);
-        }
-      }
-      localStorage.removeItem('offlineQueue');
-      alert('✅ Datos sincronizados correctamente.');
-    };
-    window.addEventListener('online', syncOfflineData);
-    return () => window.removeEventListener('online', syncOfflineData);
-  }, []);
-
-  useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
-
-  // ========== PWA INSTALL ==========
-  useEffect(() => {
-    const handleBeforeInstallPrompt = (e) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-    };
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-  }, []);
-
-  const handleInstall = () => {
-    if (deferredPrompt) {
-      deferredPrompt.prompt();
-      deferredPrompt.userChoice.then(() => setDeferredPrompt(null));
-    }
-  };
-
-  // ========== HANDLE ANSWER ==========
-  const handleAnswer = (qId, val) => {
-    setAnswers(prev => ({ ...prev, [qId]: val }));
-    saveProgressLocally();
-    if (!navigator.onLine) {
-      saveAnswerOffline(qId, val);
-      alert('📡 Sin conexión. La respuesta se guardará localmente.');
-    }
-  };
-
-  // ========== HANDLE PHOTO UPLOAD ==========
-  const handlePhotoUpload = async (qId, photoIndex, fileFromOffline = null) => {
-    const getFileFromInput = () => {
-      return new Promise((resolve) => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = 'image/*';
-        input.onchange = (e) => {
-          const file = e.target.files[0];
-          resolve(file);
-        };
-        input.click();
-      });
-    };
-
-    const file = fileFromOffline || (await getFileFromInput());
-    if (!file) return;
-
-    const btn = document.getElementById(`btn-${qId}-${photoIndex}`);
-    if (btn) btn.innerText = 'Subiendo...';
-
-    if (!navigator.onLine) {
-      savePhotoOffline(qId, photoIndex, file);
-      setUploadMessage({ show: true, text: '📡 Sin conexión. Se guardará localmente.', type: 'info' });
-      if (btn) btn.innerHTML = '📱 Pendiente';
-      setTimeout(() => setUploadMessage({ show: false, text: '', type: '' }), 2000);
-      return;
-    }
-
-    const fileName = `${companyData.rif || 'temp'}_${qId}_${photoIndex}_${Date.now()}.jpg`;
-    const { error } = await supabase.storage.from('evidencias').upload(fileName, file);
-    if (error) {
-      setUploadMessage({ show: true, text: '❌ Error al subir', type: 'error' });
-      if (btn) btn.innerText = 'Reintentar';
-      setTimeout(() => setUploadMessage({ show: false, text: '', type: '' }), 3000);
-      return;
-    }
-    const { data: publicUrlData } = supabase.storage.from('evidencias').getPublicUrl(fileName);
-    const photoUrl = publicUrlData.publicUrl;
-    const analysis = analyzeImage(qId);
-    setEvidences(prev => {
-      const current = prev[qId] || [];
-      const updated = [...current];
-      updated[photoIndex] = { url: photoUrl, analysis: analysis };
-      return { ...prev, [qId]: updated };
-    });
-    setUploadMessage({ show: true, text: '✅ Archivo guardado', type: 'success' });
-    if (btn) btn.innerHTML = '✓ Foto';
-    setTimeout(() => setUploadMessage({ show: false, text: '', type: '' }), 2000);
-    saveProgressLocally();
-  };
-
-  // ========== VALIDACIÓN DE DATOS DE EMPRESA ==========
-  const validateCompanyData = () => {
-    const errors = {};
-    if (!companyData.name.trim()) errors.name = 'El nombre comercial es obligatorio';
-    if (!companyData.rif.trim()) errors.rif = 'El RIF es obligatorio';
-    else {
-      const rifRegex = /^[JjVvEe][-]?\d{6,10}([-]?\d{1})?$/;
-      if (!rifRegex.test(companyData.rif)) errors.rif = 'Formato de RIF inválido (ej: J-12345678-9 o J123456789)';
-    }
-    if (!companyData.sector) errors.sector = 'Debe seleccionar un sector';
-    if (!companyData.state) errors.state = 'Debe seleccionar un estado';
-    if (!companyData.city) errors.city = 'Debe seleccionar un municipio';
-    if (!companyData.address.trim()) errors.address = 'La dirección es obligatoria';
-    setRegistrationErrors(errors);
-    return Object.keys(errors).length === 0;
-  };
-
-  // ========== GUARDAR EMPRESA EN SUPABASE ==========
-  const saveRegistrationToSupabase = async () => {
+    if (!window.confirm('¿Eliminar este usuario? Las empresas quedarán sin usuario asignado.')) return;
     try {
-      const userId = user?.id || ADMIN_ID;
-      const userEmail = user?.email || ADMIN_EMAIL;
-
-      if (!userId) {
-        alert('No se pudo identificar al usuario');
-        return;
-      }
-
-      if (!navigator.onLine) {
-        const pendingRegistration = { companyData, answers, evidences, user_id: userId, timestamp: Date.now() };
-        localStorage.setItem('pendingRegistration', JSON.stringify(pendingRegistration));
-        alert('Registro guardado localmente. Se enviará cuando haya conexión.');
-        localStorage.removeItem('omnitour_progress');
-        localStorage.removeItem('progress_loaded');
-        setView('results');
-        return;
-      }
-
-      const { data: company, error: companyError } = await supabase
-        .from('companies')
-        .insert({
-          name: companyData.name,
-          rif: companyData.rif.toUpperCase(),
-          rtn: companyData.rtn,
-          sector: companyData.sector,
-          address: `${companyData.address}, ${companyData.city}, ${companyData.state}`,
-          phone: companyData.phone,
-          email: companyData.email,
-          total_score: getTotalStats().score,
-          total_percentage: getTotalStats().pct,
-          user_id: userId,
-        })
-        .select()
-        .single();
-      if (companyError) throw companyError;
-      const answersToInsert = Object.entries(answers).map(([qId, value]) => ({ company_id: company.id, question_id: qId, score: value }));
-      if (answersToInsert.length) await supabase.from('answers').insert(answersToInsert);
-      const evidencesToInsert = Object.entries(evidences).flatMap(([qId, photos]) =>
-        photos.filter(p => p && p.url).map(p => ({
-          company_id: company.id,
-          question_id: qId,
-          photo_urls: [p.url],
-          ai_analysis: [p.analysis]
-        }))
-      );
-      if (evidencesToInsert.length) await supabase.from('evidences').insert(evidencesToInsert);
-      alert('¡Gracias por participar!');
-      localStorage.removeItem('omnitour_progress');
-      localStorage.removeItem('progress_loaded');
+      await supabase.from('companies').update({ user_id: null }).eq('user_id', userId);
+      const { error } = await supabase.from('profiles').delete().eq('id', userId);
+      if (error) throw error;
+      await cargarUsuarios();
+      alert('Usuario eliminado correctamente.');
     } catch (error) {
-      console.error(error);
-      alert('Error al guardar');
+      alert('Error al eliminar usuario: ' + error.message);
     }
   };
 
-  // ========== ADMIN: CARGAR EMPRESAS Y USUARIOS ==========
+  const enviarResetPassword = async (email) => {
+    if (userRole !== 'admin') return;
+    if (!email) return;
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin + '/reset-password',
+      });
+      if (error) throw error;
+      alert(`Se ha enviado un enlace de restablecimiento a ${email}`);
+    } catch (error) {
+      alert('Error al enviar enlace: ' + error.message);
+    }
+  };
+
+  // ============================================================
+  // CARGA DE EMPRESAS Y USUARIOS
+  // ============================================================
   const cargarEmpresas = async (userId) => {
-    const uid = userId || user?.id || ADMIN_ID;
+    const uid = userId || user?.id;
     if (!uid) {
       console.warn('No user id available to load companies');
+      setAllCompanies([]);
+      setFilteredCompanies([]);
       return;
     }
-    let query = supabase.from('companies').select('*').order('created_at', { ascending: false });
-    if (userRole !== 'admin') {
-      query = query.eq('user_id', uid);
+    try {
+      let query = supabase.from('companies').select('*').order('created_at', { ascending: false });
+      if (userRole !== 'admin') {
+        query = query.eq('user_id', uid);
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      setAllCompanies(data || []);
+      setFilteredCompanies(data || []);
+      calcularStatsPorEstado(data || []);
+    } catch (error) {
+      console.error('Error cargando empresas:', error);
+      setAllCompanies([]);
+      setFilteredCompanies([]);
     }
-    const { data } = await query;
-    setAllCompanies(data || []);
-    setFilteredCompanies(data || []);
-    calcularStatsPorEstado(data || []);
   };
 
   const cargarUsuarios = async () => {
     if (userRole !== 'admin') return;
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .order('created_at', { ascending: false });
-    setAllUsers(data || []);
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      setAllUsers(data || []);
+    } catch (error) {
+      console.error('Error cargando usuarios:', error);
+      setAllUsers([]);
+    }
   };
 
   const buscarEmpresaPorRif = async () => {
@@ -837,7 +546,7 @@ const App = () => {
     const rifUpper = searchRif.trim().toUpperCase();
     let query = supabase.from('companies').select('*').eq('rif', rifUpper);
     if (userRole !== 'admin') {
-      query = query.eq('user_id', user?.id || ADMIN_ID);
+      query = query.eq('user_id', user?.id);
     }
     const { data, error } = await query.maybeSingle();
     setLoadingSearch(false);
@@ -905,6 +614,368 @@ const App = () => {
     return 'bg-red-500';
   };
 
+  // ============================================================
+  // FUNCIONES DE PUNTUACIÓN
+  // ============================================================
+  const getModuleScore = (moduleId) => {
+    const mod = getCurrentModules().find(m => m.id === moduleId);
+    if (!mod) return { score: 0, max: 1, pct: 0 };
+    let score = 0, max = 0;
+    mod.questions.forEach(q => {
+      score += (answers[q.id] || 0);
+      max += q.max;
+    });
+    return { score, max, pct: Math.round((score / max) * 100) || 0 };
+  };
+
+  const getTotalStats = () => {
+    const modules = getCurrentModules();
+    let totalScore = 0, totalMax = 0;
+    modules.forEach(m => {
+      const s = getModuleScore(m.id);
+      totalScore += s.score;
+      totalMax += s.max;
+    });
+    const pct = totalMax === 0 ? 0 : Math.round((totalScore / totalMax) * 100);
+    return { score: totalScore, max: totalMax, pct };
+  };
+
+  const getCurrentModules = () => {
+    if (registrationModules.length > 0) return registrationModules;
+    if (companyData.sector) {
+      const mods = getModulesBySector(companyData.sector);
+      setRegistrationModules(mods);
+      return mods;
+    }
+    return [];
+  };
+
+  const getAchievementImage = (pct) => {
+    if (pct >= 85) return '/Oro.png';
+    if (pct >= 75) return '/plata.png';
+    if (pct >= 60) return '/Bronce.png';
+    if (pct >= 50) return '/Normal.png';
+    return '/inaccesibilidad.png';
+  };
+
+  const isCurrentModuleComplete = () => {
+    const modules = getCurrentModules();
+    if (modules.length === 0) return false;
+    const currentMod = modules[currentModule];
+    if (!currentMod) return false;
+    const missingQuestions = currentMod.questions.filter(q => answers[q.id] === undefined);
+    if (missingQuestions.length > 0) {
+      const missingList = missingQuestions.map((q, idx) => `${idx + 1}. ${q.text}`).join('\n');
+      alert(`❌ Faltan ${missingQuestions.length} pregunta(s) por responder en este módulo:\n\n${missingList}`);
+      return false;
+    }
+    return true;
+  };
+
+  // ============================================================
+  // SUBIR FOTOS Y ANÁLISIS
+  // ============================================================
+  const getQuestionText = (qId) => {
+    const modules = getCurrentModules();
+    for (let mod of modules) {
+      const q = mod.questions.find(q => q.id === qId);
+      if (q) return q.text;
+    }
+    return '';
+  };
+
+  const analyzeImage = (qId) => {
+    const questionText = getQuestionText(qId).toLowerCase();
+    const keywords = ['rampa', 'pasamanos', 'ancho', 'sanitario', 'mobiliario', 'braille', 'iluminación', 'alarma', 'acústica'];
+    const found = keywords.filter(k => questionText.includes(k));
+    if (found.length === 0) return "Análisis no concluyente. Se requiere inspección manual.";
+    return `Se detectan elementos relacionados con: ${found.join(', ')}. La evidencia visual sugiere ${Math.random() > 0.5 ? 'cumplimiento parcial' : 'necesidad de mejora'}.`;
+  };
+
+  // ============================================================
+  // GUARDADO LOCAL Y SINCRONIZACIÓN OFFLINE
+  // ============================================================
+  const saveProgressLocally = () => {
+    const progress = {
+      answers,
+      currentModule,
+      currentQuestionPage,
+      companyData,
+      evidences,
+      timestamp: Date.now()
+    };
+    localStorage.setItem('omnitour_progress', JSON.stringify(progress));
+  };
+
+  const loadProgressLocally = () => {
+    const saved = localStorage.getItem('omnitour_progress');
+    if (saved) {
+      try {
+        const { answers: savedAnswers, currentModule: savedModule, currentQuestionPage: savedPage, companyData: savedCompany, evidences: savedEvidences } = JSON.parse(saved);
+        setAnswers(savedAnswers);
+        setCurrentModule(savedModule);
+        setCurrentQuestionPage(savedPage);
+        setCompanyData(savedCompany);
+        setEvidences(savedEvidences);
+        if (savedCompany.sector) {
+          const mods = getModulesBySector(savedCompany.sector);
+          setRegistrationModules(mods);
+        }
+        alert('✅ Se ha recuperado el progreso guardado.');
+      } catch(e) { console.error(e); }
+    }
+  };
+
+  const saveAnswerOffline = (qId, val) => {
+    const offlineQueue = JSON.parse(localStorage.getItem('offlineQueue') || '[]');
+    offlineQueue.push({ type: 'answer', qId, val, timestamp: Date.now() });
+    localStorage.setItem('offlineQueue', JSON.stringify(offlineQueue));
+  };
+
+  const savePhotoOffline = (qId, photoIndex, file) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const offlineQueue = JSON.parse(localStorage.getItem('offlineQueue') || '[]');
+      offlineQueue.push({ type: 'photo', qId, photoIndex, data: reader.result, timestamp: Date.now() });
+      localStorage.setItem('offlineQueue', JSON.stringify(offlineQueue));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  useEffect(() => {
+    const syncOfflineData = async () => {
+      const queue = JSON.parse(localStorage.getItem('offlineQueue') || '[]');
+      if (queue.length === 0) return;
+      alert('🔄 Conexión recuperada. Sincronizando datos pendientes...');
+      for (const item of queue) {
+        if (item.type === 'answer') {
+          handleAnswer(item.qId, item.val);
+        } else if (item.type === 'photo') {
+          const blob = dataURItoBlob(item.data);
+          const file = new File([blob], `offline_${item.qId}_${item.photoIndex}.jpg`, { type: 'image/jpeg' });
+          await handlePhotoUpload(item.qId, item.photoIndex, file);
+        }
+      }
+      localStorage.removeItem('offlineQueue');
+      alert('✅ Datos sincronizados correctamente.');
+    };
+    window.addEventListener('online', syncOfflineData);
+    return () => window.removeEventListener('online', syncOfflineData);
+  }, []);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // ============================================================
+  // PWA INSTALL
+  // ============================================================
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  }, []);
+
+  const handleInstall = () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then(() => setDeferredPrompt(null));
+    }
+  };
+
+  // ============================================================
+  // HANDLE ANSWER & PHOTO UPLOAD
+  // ============================================================
+  const handleAnswer = (qId, val) => {
+    setAnswers(prev => ({ ...prev, [qId]: val }));
+    saveProgressLocally();
+    if (!navigator.onLine) {
+      saveAnswerOffline(qId, val);
+      alert('📡 Sin conexión. La respuesta se guardará localmente.');
+    }
+  };
+
+  const handlePhotoUpload = async (qId, photoIndex, fileFromOffline = null) => {
+    const getFileFromInput = () => {
+      return new Promise((resolve) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = (e) => {
+          const file = e.target.files[0];
+          resolve(file);
+        };
+        input.click();
+      });
+    };
+
+    const file = fileFromOffline || (await getFileFromInput());
+    if (!file) return;
+
+    const btn = document.getElementById(`btn-${qId}-${photoIndex}`);
+    if (btn) btn.innerText = 'Subiendo...';
+
+    if (!navigator.onLine) {
+      savePhotoOffline(qId, photoIndex, file);
+      setUploadMessage({ show: true, text: '📡 Sin conexión. Se guardará localmente.', type: 'info' });
+      if (btn) btn.innerHTML = '📱 Pendiente';
+      setTimeout(() => setUploadMessage({ show: false, text: '', type: '' }), 2000);
+      return;
+    }
+
+    const fileName = `${companyData.rif || 'temp'}_${qId}_${photoIndex}_${Date.now()}.jpg`;
+    const { error } = await supabase.storage.from('evidencias').upload(fileName, file);
+    if (error) {
+      setUploadMessage({ show: true, text: '❌ Error al subir', type: 'error' });
+      if (btn) btn.innerText = 'Reintentar';
+      setTimeout(() => setUploadMessage({ show: false, text: '', type: '' }), 3000);
+      return;
+    }
+    const { data: publicUrlData } = supabase.storage.from('evidencias').getPublicUrl(fileName);
+    const photoUrl = publicUrlData.publicUrl;
+    const analysis = analyzeImage(qId);
+    setEvidences(prev => {
+      const current = prev[qId] || [];
+      const updated = [...current];
+      updated[photoIndex] = { url: photoUrl, analysis: analysis };
+      return { ...prev, [qId]: updated };
+    });
+    setUploadMessage({ show: true, text: '✅ Archivo guardado', type: 'success' });
+    if (btn) btn.innerHTML = '✓ Foto';
+    setTimeout(() => setUploadMessage({ show: false, text: '', type: '' }), 2000);
+    saveProgressLocally();
+  };
+
+  // ============================================================
+  // VALIDACIÓN DE DATOS DE EMPRESA
+  // ============================================================
+  const validateCompanyData = () => {
+    const errors = {};
+    if (!companyData.name.trim()) errors.name = 'El nombre comercial es obligatorio';
+    if (!companyData.rif.trim()) errors.rif = 'El RIF es obligatorio';
+    else {
+      const rifRegex = /^[JjVvEe][-]?\d{6,10}([-]?\d{1})?$/;
+      if (!rifRegex.test(companyData.rif)) errors.rif = 'Formato de RIF inválido (ej: J-12345678-9 o J123456789)';
+    }
+    if (!companyData.sector) errors.sector = 'Debe seleccionar un sector';
+    if (!companyData.state) errors.state = 'Debe seleccionar un estado';
+    if (!companyData.city) errors.city = 'Debe seleccionar un municipio';
+    if (!companyData.address.trim()) errors.address = 'La dirección es obligatoria';
+    setRegistrationErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  // ============================================================
+  // ENVÍO DE CORREO CON REPORTE (placeholder)
+  // ============================================================
+  const sendCompanyReportEmail = async (company, reportBlob) => {
+    try {
+      console.log('Reporte generado, pendiente de envío por correo.');
+      alert('📧 Reporte generado. Para enviarlo por correo, configura la Edge Function de Supabase.');
+    } catch (error) {
+      console.error('Error enviando correo:', error);
+      alert('⚠️ No se pudo enviar el reporte por correo. Descárgalo manualmente.');
+    }
+  };
+
+  // ============================================================
+  // GUARDAR REGISTRO EN SUPABASE
+  // ============================================================
+  const saveRegistrationToSupabase = async () => {
+    try {
+      const userId = user?.id;
+      if (!userId) {
+        alert('No se pudo identificar al usuario');
+        return;
+      }
+
+      if (!navigator.onLine) {
+        const pendingRegistration = { companyData, answers, evidences, user_id: userId, timestamp: Date.now() };
+        localStorage.setItem('pendingRegistration', JSON.stringify(pendingRegistration));
+        alert('Registro guardado localmente. Se enviará cuando haya conexión.');
+        localStorage.removeItem('omnitour_progress');
+        localStorage.removeItem('progress_loaded');
+        setView('results');
+        return;
+      }
+
+      // Insertar empresa
+      const { data: company, error: companyError } = await supabase
+        .from('companies')
+        .insert({
+          name: companyData.name,
+          rif: companyData.rif.toUpperCase(),
+          rtn: companyData.rtn,
+          sector: companyData.sector,
+          address: `${companyData.address}, ${companyData.city}, ${companyData.state}`,
+          phone: companyData.phone,
+          email: companyData.email,
+          total_score: getTotalStats().score,
+          total_percentage: getTotalStats().pct,
+          user_id: userId,
+        })
+        .select()
+        .single();
+      if (companyError) throw companyError;
+
+      // Insertar respuestas
+      const answersToInsert = Object.entries(answers).map(([qId, value]) => ({ company_id: company.id, question_id: qId, score: value }));
+      if (answersToInsert.length) await supabase.from('answers').insert(answersToInsert);
+
+      // Insertar evidencias
+      const evidencesToInsert = Object.entries(evidences).flatMap(([qId, photos]) =>
+        photos.filter(p => p && p.url).map(p => ({
+          company_id: company.id,
+          question_id: qId,
+          photo_urls: [p.url],
+          ai_analysis: [p.analysis]
+        }))
+      );
+      if (evidencesToInsert.length) await supabase.from('evidences').insert(evidencesToInsert);
+
+      // Mensaje de éxito
+      alert(
+        `✅ ¡Carga exitosa!\n\n` +
+        `Empresa: ${companyData.name}\n` +
+        `RIF: ${companyData.rif}\n` +
+        `Sector: ${companyData.sector}\n` +
+        `Porcentaje de accesibilidad: ${getTotalStats().pct}%\n\n` +
+        `Se ha generado el reporte.`
+      );
+
+      // Generar reporte Word
+      try {
+        const reportBlob = await generateCompanyReportWord(company, true);
+        if (reportBlob) {
+          await sendCompanyReportEmail(company, reportBlob);
+        }
+      } catch (reportError) {
+        console.error('Error generando reporte:', reportError);
+        alert('El registro se completó, pero hubo un problema al generar el reporte.');
+      }
+
+      localStorage.removeItem('omnitour_progress');
+      localStorage.removeItem('progress_loaded');
+      setView('results');
+    } catch (error) {
+      console.error(error);
+      alert('Error al guardar: ' + error.message);
+    }
+  };
+
+  // ============================================================
+  // FUNCIONES DE ADMIN Y REPORTE WORD
+  // ============================================================
   const getCategoryDescription = (name, pct) => {
     if (name === 'Infraestructura y Entorno Físico') {
       if (pct === 0) return `El módulo "${name}" es nulo. No se evidencia accesibilidad.`;
@@ -939,8 +1010,7 @@ const App = () => {
     return `Módulo evaluado con ${pct}% de cumplimiento.`;
   };
 
-  // ========== GENERAR REPORTE EN WORD ==========
-  const generateCompanyReportWord = async (company) => {
+  const generateCompanyReportWord = async (company, returnBlob = false) => {
     try {
       const { data: respuestas } = await supabase.from('answers').select('*').eq('company_id', company.id);
       if (!respuestas || respuestas.length === 0) {
@@ -974,8 +1044,12 @@ const App = () => {
       else { nivelTexto = 'INACCESIBLE (Crítico)'; trofeoImagen = '/inaccesibilidad.png'; }
 
       const fetchImageAsArrayBuffer = async (url) => {
-        const res = await fetch(url);
-        return await res.arrayBuffer();
+        try {
+          const res = await fetch(url);
+          return await res.arrayBuffer();
+        } catch {
+          return null;
+        }
       };
 
       const logoOmniBuffer = await fetchImageAsArrayBuffer('/Logo-Omnitours.png');
@@ -986,9 +1060,9 @@ const App = () => {
         children: [
           new Paragraph({
             children: [
-              new ImageRun({ data: logoOmniBuffer, transformation: { width: 100, height: 50 } }),
+              logoOmniBuffer ? new ImageRun({ data: logoOmniBuffer, transformation: { width: 100 } }) : new TextRun(''),
               new TextRun('      '),
-              new ImageRun({ data: logoIaetBuffer, transformation: { width: 50, height: 50 } })
+              logoIaetBuffer ? new ImageRun({ data: logoIaetBuffer, transformation: { width: 50 } }) : new TextRun('')
             ],
             alignment: AlignmentType.CENTER,
             spacing: { after: 100 }
@@ -1008,7 +1082,7 @@ const App = () => {
       sections.push(
         new Paragraph({ children: [new TextRun({ text: 'La empresa turística se encuentra en el nivel de', bold: true, size: 22 })], alignment: AlignmentType.CENTER }),
         new Paragraph({ children: [new TextRun({ text: nivelTexto, bold: true, color: "4F46E5", size: 28 })], alignment: AlignmentType.CENTER }),
-        new Paragraph({ children: [new ImageRun({ data: trofeoBuffer, transformation: { width: 120, height: 120 } })], alignment: AlignmentType.CENTER, spacing: { after: 300 } })
+        trofeoBuffer ? new Paragraph({ children: [new ImageRun({ data: trofeoBuffer, transformation: { width: 120 } })], alignment: AlignmentType.CENTER, spacing: { after: 300 } }) : new Paragraph({ text: '', spacing: { after: 300 } })
       );
 
       sections.push(new Paragraph({ children: [new TextRun({ text: 'Resultados por categoría', bold: true, size: 22 })], spacing: { after: 200 } }));
@@ -1027,7 +1101,7 @@ const App = () => {
         ctx.font = 'bold 18px Arial'; ctx.fillStyle = '#1e293b'; ctx.fillText(`${m.pct}%`, 100, 115);
         const imgBuffer = await dataURLToArrayBuffer(canvas.toDataURL());
         sections.push(
-          new Paragraph({ children: [new ImageRun({ data: imgBuffer, transformation: { width: 150, height: 150 } })], alignment: AlignmentType.CENTER, spacing: { after: 50 } }),
+          new Paragraph({ children: [new ImageRun({ data: imgBuffer, transformation: { width: 150 } })], alignment: AlignmentType.CENTER, spacing: { after: 50 } }),
           new Paragraph({ children: [new TextRun({ text: `${m.name}: ${m.pct}%`, bold: true, size: 18 })], alignment: AlignmentType.CENTER, spacing: { after: 100 } }),
           new Paragraph({ children: [new TextRun(m.description)], spacing: { after: 200 } })
         );
@@ -1046,22 +1120,42 @@ const App = () => {
 
       sections.push(
         new Paragraph({ children: [new TextRun({ text: 'Resultado General de Accesibilidad', bold: true, size: 22 })], spacing: { after: 200 } }),
-        new Paragraph({ children: [new ImageRun({ data: generalImgBuffer, transformation: { width: 150, height: 150 } })], alignment: AlignmentType.CENTER, spacing: { after: 50 } }),
+        new Paragraph({ children: [new ImageRun({ data: generalImgBuffer, transformation: { width: 150 } })], alignment: AlignmentType.CENTER, spacing: { after: 50 } }),
         new Paragraph({ children: [new TextRun({ text: `${totalPct}%`, bold: true, size: 24 })], alignment: AlignmentType.CENTER, spacing: { after: 100 } }),
         new Paragraph({ children: [new TextRun(totalPct >= 85 ? 'Excelente nivel global.' : totalPct >= 70 ? 'Buen nivel, atender áreas identificadas.' : totalPct >= 50 ? 'Nivel básico, plan de mejora urgente.' : 'Nivel crítico, intervención inmediata.')], alignment: AlignmentType.CENTER, spacing: { after: 400 } })
       );
 
+      // ========== RECOMENDACIONES DINÁMICAS ==========
       sections.push(new Paragraph({ children: [new TextRun({ text: 'Recomendaciones generales', bold: true, size: 20 })], spacing: { after: 200 } }));
-      const recs = [
-        'Realizar una auditoría externa especializada en accesibilidad.',
-        'Crear un comité de accesibilidad con personas con discapacidad.',
-        'Priorizar mejoras en accesos, sanitarios y comunicación visual.',
-        'Recibir formación y capacitación en turismo accesible contactar con el IAET',
-        'Capacitación en Lengua de Señas Venezolana, Orientación y Movilidad.'
-      ];
+      const recs = [];
+
+      // Primera recomendación siempre IAET
+      recs.push('Recibir formación y capacitación en turismo accesible contactar con el IAET.');
+
+      // Recomendaciones según nivel
+      if (totalPct >= 85) {
+        recs.push('Mantener y mejorar aspectos menores identificados en el informe.');
+        recs.push('Realizar auditorías periódicas para asegurar la continuidad de la accesibilidad.');
+      } else if (totalPct >= 60) {
+        recs.push('Priorizar mejoras en accesos, sanitarios y comunicación visual.');
+        recs.push('Capacitar al personal en atención a personas con discapacidad.');
+        recs.push('Implementar ayudas técnicas básicas (rampas, señalética, bucles magnéticos).');
+      } else if (totalPct >= 40) {
+        recs.push('Realizar una auditoría externa especializada en accesibilidad.');
+        recs.push('Crear un comité de accesibilidad con personas con discapacidad.');
+        recs.push('Elaborar un plan de mejora a corto y mediano plazo.');
+        recs.push('Priorizar la adecuación de sanitarios y accesos.');
+      } else {
+        recs.push('Plan de mejora integral con intervención inmediata en todos los módulos.');
+        recs.push('Contratar un asesor en accesibilidad universal.');
+        recs.push('Realizar un diagnóstico detallado de cada área.');
+        recs.push('Establecer un cronograma de acciones correctivas.');
+      }
+
       recs.forEach(rec => sections.push(new Paragraph({ children: [new TextRun(`• ${rec}`)], bullet: { level: 0 }, spacing: { after: 100 } })));
       sections.push(new Paragraph({ text: '', spacing: { after: 400 } }));
 
+      // Evidencias
       if (evidenciasData && evidenciasData.length > 0) {
         sections.push(new Paragraph({ children: [new TextRun({ text: 'Evidencias fotográficas y análisis de IA', bold: true, size: 20 })], spacing: { after: 200 } }));
         for (const ev of evidenciasData) {
@@ -1072,7 +1166,11 @@ const App = () => {
           if (photoUrl) {
             try {
               const imgBuffer = await fetchImageAsArrayBuffer(photoUrl);
-              sections.push(new Paragraph({ children: [new ImageRun({ data: imgBuffer, transformation: { width: 300, height: 200 } })], alignment: AlignmentType.CENTER, spacing: { after: 100 } }));
+              if (imgBuffer) {
+                sections.push(new Paragraph({ children: [new ImageRun({ data: imgBuffer, transformation: { width: 300 } })], alignment: AlignmentType.CENTER, spacing: { after: 100 } }));
+              } else {
+                sections.push(new Paragraph({ children: [new TextRun('[No se pudo cargar la imagen]')], spacing: { after: 100 } }));
+              }
             } catch (err) { sections.push(new Paragraph({ children: [new TextRun('[No se pudo cargar la imagen]')], spacing: { after: 100 } })); }
           }
           sections.push(new Paragraph({ children: [new TextRun(`🤖 Análisis IA: ${analysis}`)], spacing: { after: 400 } }));
@@ -1094,27 +1192,33 @@ const App = () => {
           }
         }]
       });
+
       const blob = await Packer.toBlob(doc);
-      saveAs(blob, `reporte_${company.rif}.docx`);
+      if (returnBlob) {
+        return blob;
+      } else {
+        saveAs(blob, `reporte_${company.rif}.docx`);
+      }
     } catch (error) {
       console.error('Error generando reporte Word:', error);
       alert('Error al generar el reporte: ' + error.message);
     }
   };
 
-  const dataURLToArrayBuffer = (dataURL) => {
-    const base64 = dataURL.split(',')[1];
-    const binary = atob(base64);
-    const array = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) array[i] = binary.charCodeAt(i);
-    return array.buffer;
+  // ============================================================
+  // FUNCIONES DE ACCESIBILIDAD
+  // ============================================================
+  const increaseFontSize = () => setFontSizeMultiplier(prev => Math.min(prev + 0.1, 2));
+  const decreaseFontSize = () => setFontSizeMultiplier(prev => Math.max(prev - 0.1, 0.8));
+  const cycleContrastMode = () => {
+    const modes = ['normal-contrast', 'high-contrast', 'yellow-on-black'];
+    const currentIndex = modes.indexOf(contrastMode);
+    setContrastMode(modes[(currentIndex + 1) % modes.length]);
   };
 
-  const textSizeStyle = { fontSize: `${fontSizeMultiplier * 1}rem` };
-
-  // ============================================
-  // PANTALLA DE CARGA (solo aparece si no está en modo demo)
-  // ============================================
+  // ============================================================
+  // RENDER
+  // ============================================================
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -1126,17 +1230,16 @@ const App = () => {
     );
   }
 
-  // ============================================
-  // PANTALLA DE LOGIN (solo se muestra si no hay usuario)
-  // ============================================
   if (!user) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 p-4">
-        <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full">
-          <img src="/Logo-Omnitours.png" alt="Omnitours" className="h-16 mx-auto mb-6" />
-          <h1 className="text-2xl font-black text-center mb-2">OmniTour</h1>
-          <p className="text-center text-slate-500 text-sm mb-6">Inicia sesión para continuar</p>
-          
+<div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full">
+  <img 
+    src="/Logo-Omnitours.png" 
+    alt="Omnitours" 
+    className="w-32 sm:w-40 md:w-48 lg:w-56 xl:w-64 mx-auto mb-6 h-auto" 
+  />
+  <h1 className="text-2xl font-black text-center mb-2">OmniTour</h1>
+  <p className="text-center text-slate-500 text-sm mb-6">Inicia sesión para continuar</p>
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label className="text-xs font-black uppercase text-slate-400">Email</label>
@@ -1167,55 +1270,55 @@ const App = () => {
             </button>
           </form>
           
-          {/* 🔑 BOTÓN DE ACCESO ADMIN DEMO */}
-          <div className="mt-4">
-            <button
-              onClick={handleAdminDemoLogin}
-              className="w-full bg-emerald-600 text-white py-3 rounded-xl font-black hover:bg-emerald-700 active:scale-95 transition-all flex items-center justify-center gap-2"
-            >
-              <Shield size={20} /> Acceso administrador (demo)
-            </button>
-          </div>
-          
           <div className="mt-6 text-center text-xs text-slate-500">
-            <p>Si eres administrador, usa tus credenciales.</p>
-            <p className="mt-1">¿No tienes cuenta? Contacta al administrador.</p>
+            <p>¿No tienes cuenta? Contacta al administrador.</p>
           </div>
         </div>
-      </div>
+      
     );
   }
 
-  // ============================================
-  // RENDER PRINCIPAL (SESION INICIADA)
-  // ============================================
+  // ============================================================
+  // APLICACIÓN PRINCIPAL
+  // ============================================================
+  const textSizeStyle = { fontSize: `${fontSizeMultiplier * 1}rem` };
+  const contrastClasses = contrastMode === 'high-contrast' ? 'bg-black text-white' : 
+                         contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300' : '';
+
   return (
-    <div className="flex flex-col h-screen font-sans relative" style={textSizeStyle}>
-      <img src="/iaet-logo.png" alt="IAET" style={{ position: 'fixed', bottom: '20px', right: '20px', opacity: 0.15, zIndex: 999, pointerEvents: 'none', width: '30px' }} />
-      
+    <div className={`flex flex-col h-screen font-sans relative ${contrastClasses}`} style={textSizeStyle}>
+      <img 
+  src="/iaet-logo.png" 
+  alt="IAET" 
+  className="fixed bottom-4 right-4 opacity-15 pointer-events-none z-50 w-10 sm:w-14 md:w-20 lg:w-24 xl:w-30"
+/>
       {uploadMessage.show && (
         <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-4 py-2 rounded-full shadow-lg text-white text-sm font-bold ${uploadMessage.type === 'success' ? 'bg-green-500' : 'bg-red-500'}`}>
           {uploadMessage.text}
         </div>
       )}
 
-      <header className="bg-white/90 backdrop-blur-md p-4 shadow-sm flex justify-between items-center sticky top-0 z-50 border-b">
+      <header className={`bg-white/90 backdrop-blur-md p-4 shadow-sm flex justify-between items-center sticky top-0 z-50 border-b ${contrastMode === 'high-contrast' ? 'bg-black border-white' : ''} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300' : ''}`}>
         <div className="flex items-center gap-3">
-          <img src="/Logo-Omnitours.png" alt="Omnitours" className="h-12 w-auto" />
-          <div className="text-xs">
-            <span className="font-black text-slate-800">{user.email}</span>
-            <span className={`ml-2 px-2 py-0.5 rounded-full text-[8px] font-black ${userRole === 'admin' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>
+        <img 
+      src="/Logo-Omnitours.png" 
+      alt="Omnitours" 
+      className="h-16 sm:h-12 md:h-14 lg:h-16 xl:h-20 w-auto" 
+    />
+    <div className="text-xs">
+            <span className={`font-black ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-800'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{user.email}</span>
+            <span className={`ml-2 px-2 py-0.5 rounded-full text-[8px] font-black ${userRole === 'admin' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'} ${contrastMode === 'high-contrast' ? (userRole === 'admin' ? 'bg-yellow-300 text-black' : 'bg-white text-black') : ''} ${contrastMode === 'yellow-on-black' ? (userRole === 'admin' ? 'bg-yellow-300 text-black' : 'bg-white text-black') : ''}`}>
               {userRole === 'admin' ? 'ADMIN' : 'USUARIO'}
             </span>
           </div>
         </div>
         <div className="flex gap-2 items-center flex-wrap">
-          <button onClick={increaseFontSize} className="p-1 rounded-full hover:bg-slate-200 active:bg-teal-500"><Type size={18} /></button>
-          <button onClick={decreaseFontSize} className="p-1 rounded-full hover:bg-slate-200 active:bg-teal-500"><Type size={18} /></button>
-          <button onClick={cycleContrastMode} className="p-1 rounded-full hover:bg-slate-200 active:bg-teal-500"><Contrast size={18} /></button>
+          <button onClick={increaseFontSize} className={`p-1 rounded-full hover:bg-slate-200 active:bg-teal-500 ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}><Type size={18} /></button>
+          <button onClick={decreaseFontSize} className={`p-1 rounded-full hover:bg-slate-200 active:bg-teal-500 ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}><Type size={18} /></button>
+          <button onClick={cycleContrastMode} className={`p-1 rounded-full hover:bg-slate-200 active:bg-teal-500 ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}><Contrast size={18} /></button>
           
           {userRole === 'admin' && (
-            <button onClick={() => { setView('adminDashboard'); cargarEmpresas(); cargarUsuarios(); }} className="text-indigo-600 text-xs flex items-center gap-1 active:bg-teal-500 px-2 py-1 rounded-lg bg-indigo-50">
+            <button onClick={() => { setView('adminDashboard'); cargarEmpresas(); cargarUsuarios(); }} className={`text-indigo-600 text-xs flex items-center gap-1 active:bg-teal-500 px-2 py-1 rounded-lg bg-indigo-50 ${contrastMode === 'high-contrast' ? 'bg-black text-yellow-300 border border-yellow-300' : ''} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border border-yellow-300' : ''}`}>
               <LayoutDashboard size={16} /> Panel Admin
             </button>
           )}
@@ -1228,28 +1331,28 @@ const App = () => {
           <a href="/OmniTour.apk" download className="bg-green-600 text-white px-3 py-1 rounded-lg text-xs font-black active:bg-teal-500 hover:bg-green-700 transition-colors">
             📲 Descargar App
           </a>
-          <button onClick={handleLogout} className="text-red-500 text-xs flex items-center gap-1 active:bg-teal-500 px-2 py-1 rounded-lg">
+          <button onClick={handleLogout} className={`text-red-500 text-xs flex items-center gap-1 active:bg-teal-500 px-2 py-1 rounded-lg ${contrastMode === 'high-contrast' ? 'text-red-400' : ''} ${contrastMode === 'yellow-on-black' ? 'text-red-400' : ''}`}>
             <LogOut size={16} /> Salir
           </button>
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto p-4 pb-32">
+      <main className={`flex-1 overflow-y-auto p-4 pb-32 ${contrastClasses}`}>
         {/* ========== HOME ========== */}
         {view === 'home' && (
           <div className="max-w-4xl mx-auto space-y-8 pt-4">
             <div className="text-center space-y-4">
-              <h1 className="text-4xl font-black italic uppercase bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+              <h1 className={`text-4xl font-black italic uppercase bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>
                 Sistema de Registro<br/>Omnitours "Turismo para todos"
               </h1>
-              <p className="text-lg text-slate-600 max-w-2xl mx-auto">
+              <p className={`text-lg max-w-2xl mx-auto ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>
                 Plataforma oficial de registro técnico y verificación de accesibilidad universal.
               </p>
               <div className="flex justify-center gap-4 flex-wrap">
                 <button onClick={() => setView('registration')} className="bg-indigo-600 text-white px-8 py-3 rounded-2xl font-black flex items-center gap-2 hover:bg-indigo-700 active:scale-95 transition-all shadow-lg">
                   Registrar Empresa <ArrowRight size={20} />
                 </button>
-                <button onClick={() => setView('about')} className="bg-white text-indigo-600 px-8 py-3 rounded-2xl font-black border-2 border-indigo-200 hover:bg-indigo-50 active:scale-95 transition-all">
+                <button onClick={() => setView('about')} className={`bg-white text-indigo-600 px-8 py-3 rounded-2xl font-black border-2 border-indigo-200 hover:bg-indigo-50 active:scale-95 transition-all ${contrastMode === 'high-contrast' ? 'bg-black text-yellow-300 border-yellow-300' : ''} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`}>
                   Conoce más <Info size={20} />
                 </button>
                 {userRole === 'admin' && (
@@ -1261,38 +1364,38 @@ const App = () => {
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="bg-white p-4 rounded-2xl shadow text-center border border-slate-100">
-                <Award className="text-indigo-600 mx-auto mb-2" size={32} />
+              <div className={`p-4 rounded-2xl shadow text-center border ${contrastMode === 'high-contrast' ? 'bg-black border-white text-white' : 'bg-white border-slate-100'} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300 text-yellow-300' : ''}`}>
+                <Award className={`mx-auto mb-2 ${contrastMode === 'high-contrast' ? 'text-yellow-300' : 'text-indigo-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`} size={32} />
                 <h4 className="font-black text-sm">Certificación</h4>
-                <p className="text-xs text-slate-500">Sello de calidad accesible</p>
+                <p className={`text-xs ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Sello de calidad accesible</p>
               </div>
-              <div className="bg-white p-4 rounded-2xl shadow text-center border border-slate-100">
-                <Users className="text-indigo-600 mx-auto mb-2" size={32} />
+              <div className={`p-4 rounded-2xl shadow text-center border ${contrastMode === 'high-contrast' ? 'bg-black border-white text-white' : 'bg-white border-slate-100'} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300 text-yellow-300' : ''}`}>
+                <Users className={`mx-auto mb-2 ${contrastMode === 'high-contrast' ? 'text-yellow-300' : 'text-indigo-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`} size={32} />
                 <h4 className="font-black text-sm">Inclusión</h4>
-                <p className="text-xs text-slate-500">Turismo para todos</p>
+                <p className={`text-xs ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Turismo para todos</p>
               </div>
-              <div className="bg-white p-4 rounded-2xl shadow text-center border border-slate-100">
-                <TrendingUp className="text-indigo-600 mx-auto mb-2" size={32} />
+              <div className={`p-4 rounded-2xl shadow text-center border ${contrastMode === 'high-contrast' ? 'bg-black border-white text-white' : 'bg-white border-slate-100'} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300 text-yellow-300' : ''}`}>
+                <TrendingUp className={`mx-auto mb-2 ${contrastMode === 'high-contrast' ? 'text-yellow-300' : 'text-indigo-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`} size={32} />
                 <h4 className="font-black text-sm">Mejora Continua</h4>
-                <p className="text-xs text-slate-500">Diagnóstico y asesoría</p>
+                <p className={`text-xs ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Diagnóstico y asesoría</p>
               </div>
-              <div className="bg-white p-4 rounded-2xl shadow text-center border border-slate-100">
-                <Globe className="text-indigo-600 mx-auto mb-2" size={32} />
+              <div className={`p-4 rounded-2xl shadow text-center border ${contrastMode === 'high-contrast' ? 'bg-black border-white text-white' : 'bg-white border-slate-100'} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300 text-yellow-300' : ''}`}>
+                <Globe className={`mx-auto mb-2 ${contrastMode === 'high-contrast' ? 'text-yellow-300' : 'text-indigo-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`} size={32} />
                 <h4 className="font-black text-sm">Visibilidad</h4>
-                <p className="text-xs text-slate-500">Registro nacional</p>
+                <p className={`text-xs ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Registro nacional</p>
               </div>
             </div>
 
-            <div className="bg-white p-6 rounded-3xl shadow border border-slate-100 text-center">
-              <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-4">Aliados y apoyo</h3>
+            <div className={`p-6 rounded-3xl shadow border text-center ${contrastMode === 'high-contrast' ? 'bg-black border-white' : 'bg-white border-slate-100'} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300' : ''}`}>
+              <h3 className={`text-sm font-black uppercase tracking-widest mb-4 ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-400'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Aliados y apoyo</h3>
               <div className="flex justify-center items-center gap-8 flex-wrap">
                 <img src="/iaet-logo.png" alt="IAET" className="h-12 w-auto opacity-70" />
-                <img src="/Logo-Omnitours.png" alt="Omnitours" className="h-12 w-auto opacity-70" />
-                <div className="text-xs font-bold text-slate-400">Ministerio de Turismo</div>
+                <img src="/Logo-Omnitours.png" alt="Omnitours" className="h-20 w-auto" />
+                <div className={`text-xs font-bold ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-400'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Instituto de Altos Estudios Transdisciplinarios</div>
               </div>
             </div>
 
-            <div className="text-center text-xs text-slate-400">
+            <div className={`text-center text-xs ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-400'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>
               <p>App desarrollada por el <span className="font-bold">IAET</span></p>
               <p className="mt-1">Versión 3.0 - Evaluación por sectores</p>
             </div>
@@ -1302,15 +1405,15 @@ const App = () => {
         {/* ========== ABOUT ========== */}
         {view === 'about' && (
           <div className="max-w-3xl mx-auto space-y-6">
-            <button onClick={() => setView('home')} className="text-indigo-600 flex items-center gap-1 text-sm font-black mb-4">
+            <button onClick={() => setView('home')} className={`flex items-center gap-1 text-sm font-black mb-4 ${contrastMode === 'high-contrast' ? 'text-yellow-300' : 'text-indigo-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>
               <ArrowRight className="rotate-180" size={16} /> Volver
             </button>
-            <div className="bg-white p-8 rounded-3xl shadow border">
+            <div className={`p-8 rounded-3xl shadow border ${contrastMode === 'high-contrast' ? 'bg-black border-white text-white' : 'bg-white'} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300 text-yellow-300' : ''}`}>
               <h2 className="text-2xl font-black mb-4">Acerca de OmniTour</h2>
-              <div className="space-y-4 text-slate-600">
+              <div className="space-y-4">
                 <p><strong>OmniTour</strong> es una plataforma digital que permite a las empresas turísticas venezolanas evaluar y mejorar su nivel de accesibilidad universal.</p>
                 <p>El sistema se basa en un <strong>Baremo de Accesibilidad Turística</strong> que mide aspectos como infraestructura, atención al cliente, ayudas técnicas y gestión de emergencias.</p>
-                <h4 className="font-black text-slate-800 mt-4">¿Qué obtiene al registrarse?</h4>
+                <h4 className="font-black mt-4">¿Qué obtiene al registrarse?</h4>
                 <ul className="list-disc pl-6 space-y-1">
                   <li>Diagnóstico detallado de su nivel de accesibilidad</li>
                   <li>Reporte ejecutivo en formato Word con recomendaciones</li>
@@ -1325,22 +1428,22 @@ const App = () => {
         {/* ========== REGISTRO ========== */}
         {view === 'registration' && (
           <div className="max-w-md mx-auto space-y-6">
-            <div className="bg-white p-6 rounded-3xl shadow border">
-              <h2 className="text-xl font-black mb-6 flex items-center justify-center gap-2"><Building2 size={24} className="text-indigo-600" /> Datos del Prestador</h2>
+            <div className={`p-6 rounded-3xl shadow border ${contrastMode === 'high-contrast' ? 'bg-black border-white text-white' : 'bg-white'} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300 text-yellow-300' : ''}`}>
+              <h2 className="text-xl font-black mb-6 flex items-center justify-center gap-2"><Building2 size={24} className={`${contrastMode === 'high-contrast' ? 'text-yellow-300' : 'text-indigo-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`} /> Datos del Prestador</h2>
               <div className="space-y-4">
-                <div><label className="text-[10px] font-black uppercase block text-center">Nombre Comercial *</label><input className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-center ${registrationErrors.name ? 'border-red-500' : 'border-slate-200'}`} value={companyData.name} onChange={e => setCompanyData({...companyData, name: e.target.value})} />{registrationErrors.name && <p className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.name}</p>}</div>
-                <div><label className="text-[10px] font-black uppercase block text-center">RIF *</label><input className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-center uppercase ${registrationErrors.rif ? 'border-red-500' : 'border-slate-200'}`} value={companyData.rif} onChange={e => setCompanyData({...companyData, rif: e.target.value})} />{registrationErrors.rif && <p className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.rif}</p>}</div>
-                <div><label className="text-[10px] font-black uppercase block text-center">RTN (opcional)</label><input className="w-full bg-slate-50 border rounded-xl px-4 py-3 text-center" value={companyData.rtn} onChange={e => setCompanyData({...companyData, rtn: e.target.value})} /></div>
-                <div><label className="text-[10px] font-black uppercase block text-center">Teléfono</label><input type="tel" className="w-full bg-slate-50 border rounded-xl px-4 py-3 text-center" value={companyData.phone} onChange={e => setCompanyData({...companyData, phone: e.target.value})} /></div>
-                <div><label className="text-[10px] font-black uppercase block text-center">Correo electrónico</label><input type="email" className="w-full bg-slate-50 border rounded-xl px-4 py-3 text-center" value={companyData.email} onChange={e => setCompanyData({...companyData, email: e.target.value})} /></div>
-                <div><label className="text-[10px] font-black uppercase block text-center">Estado *</label><select className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-center ${registrationErrors.state ? 'border-red-500' : 'border-slate-200'}`} value={companyData.state} onChange={e => setCompanyData({...companyData, state: e.target.value, city: ''})}><option value="">Seleccione</option>{venezuelaStates.map(s => <option key={s}>{s}</option>)}</select>{registrationErrors.state && <p className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.state}</p>}</div>
-                <div><label className="text-[10px] font-black uppercase block text-center">Municipio *</label><select className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-center ${registrationErrors.city ? 'border-red-500' : 'border-slate-200'}`} value={companyData.city} onChange={e => setCompanyData({...companyData, city: e.target.value})} disabled={!companyData.state}><option value="">Seleccione</option>{(municipalities[companyData.state] || []).map(c => <option key={c}>{c}</option>)}</select>{registrationErrors.city && <p className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.city}</p>}</div>
-                <div><label className="text-[10px] font-black uppercase block text-center">Dirección exacta *</label><input className={`w-full bg-slate-50 border rounded-xl px-4 py-3 text-center ${registrationErrors.address ? 'border-red-500' : 'border-slate-200'}`} value={companyData.address} onChange={e => setCompanyData({...companyData, address: e.target.value})} placeholder="Calle, número, referencia" />{registrationErrors.address && <p className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.address}</p>}</div>
-                <div className="rounded-2xl overflow-hidden border h-40 relative bg-slate-100 flex items-center justify-center"><MapPin size={40} className="text-slate-400" /><span className="absolute bottom-2 text-xs text-slate-500 text-center px-2">Ubicación: {companyData.address}, {companyData.city}, {companyData.state}</span></div>
+                <div><label className="text-[10px] font-black uppercase block text-center">Nombre Comercial *</label><input className={`w-full border rounded-xl px-4 py-3 text-center ${registrationErrors.name ? 'border-red-500' : 'border-slate-200'} ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.name} onChange={e => setCompanyData({...companyData, name: e.target.value})} />{registrationErrors.name && <p className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.name}</p>}</div>
+                <div><label className="text-[10px] font-black uppercase block text-center">RIF *</label><input className={`w-full border rounded-xl px-4 py-3 text-center uppercase ${registrationErrors.rif ? 'border-red-500' : 'border-slate-200'} ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.rif} onChange={e => setCompanyData({...companyData, rif: e.target.value})} />{registrationErrors.rif && <p className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.rif}</p>}</div>
+                <div><label className="text-[10px] font-black uppercase block text-center">RTN (opcional)</label><input className={`w-full border rounded-xl px-4 py-3 text-center ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.rtn} onChange={e => setCompanyData({...companyData, rtn: e.target.value})} /></div>
+                <div><label className="text-[10px] font-black uppercase block text-center">Teléfono</label><input type="tel" className={`w-full border rounded-xl px-4 py-3 text-center ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.phone} onChange={e => setCompanyData({...companyData, phone: e.target.value})} /></div>
+                <div><label className="text-[10px] font-black uppercase block text-center">Correo electrónico</label><input type="email" className={`w-full border rounded-xl px-4 py-3 text-center ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.email} onChange={e => setCompanyData({...companyData, email: e.target.value})} /></div>
+                <div><label className="text-[10px] font-black uppercase block text-center">Estado *</label><select className={`w-full border rounded-xl px-4 py-3 text-center ${registrationErrors.state ? 'border-red-500' : 'border-slate-200'} ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.state} onChange={e => setCompanyData({...companyData, state: e.target.value, city: ''})}><option value="">Seleccione</option>{venezuelaStates.map(s => <option key={s}>{s}</option>)}</select>{registrationErrors.state && <p className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.state}</p>}</div>
+                <div><label className="text-[10px] font-black uppercase block text-center">Municipio *</label><select className={`w-full border rounded-xl px-4 py-3 text-center ${registrationErrors.city ? 'border-red-500' : 'border-slate-200'} ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.city} onChange={e => setCompanyData({...companyData, city: e.target.value})} disabled={!companyData.state}><option value="">Seleccione</option>{(municipalities[companyData.state] || []).map(c => <option key={c}>{c}</option>)}</select>{registrationErrors.city && <p className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.city}</p>}</div>
+                <div><label className="text-[10px] font-black uppercase block text-center">Dirección exacta *</label><input className={`w-full border rounded-xl px-4 py-3 text-center ${registrationErrors.address ? 'border-red-500' : 'border-slate-200'} ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.address} onChange={e => setCompanyData({...companyData, address: e.target.value})} placeholder="Calle, número, referencia" />{registrationErrors.address && <p className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.address}</p>}</div>
+                <div className={`rounded-2xl overflow-hidden border h-40 relative flex items-center justify-center ${contrastMode === 'high-contrast' ? 'bg-black border-white' : 'bg-slate-100'} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300' : ''}`}><MapPin size={40} className={`${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-400'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`} /><span className={`absolute bottom-2 text-xs text-center px-2 ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Ubicación: {companyData.address}, {companyData.city}, {companyData.state}</span></div>
                 <div><label className="text-[10px] font-black uppercase block text-center">Sector * <span className="font-normal text-slate-400">(determina las preguntas)</span></label>
                   <div className="grid grid-cols-2 gap-3">
                     {sectors.map(s => (
-                      <button key={s.id} onClick={() => setCompanyData({...companyData, sector: s.id})} className={`relative flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all duration-200 active:scale-95 ${companyData.sector === s.id ? 'bg-emerald-600 text-white border-emerald-600 shadow-lg scale-[1.02]' : 'bg-white text-slate-700 border-slate-200 hover:border-emerald-300 hover:bg-emerald-50'}`}>
+                      <button key={s.id} onClick={() => setCompanyData({...companyData, sector: s.id})} className={`relative flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all duration-200 active:scale-95 ${companyData.sector === s.id ? 'bg-emerald-600 text-white border-emerald-600 shadow-lg scale-[1.02]' : 'bg-white text-slate-700 border-slate-200 hover:border-emerald-300 hover:bg-emerald-50'} ${contrastMode === 'high-contrast' ? (companyData.sector === s.id ? 'bg-yellow-300 text-black border-yellow-300' : 'bg-black text-white border-white') : ''} ${contrastMode === 'yellow-on-black' ? (companyData.sector === s.id ? 'bg-yellow-300 text-black border-yellow-300' : 'bg-black text-yellow-300 border-yellow-300') : ''}`}>
                         {companyData.sector === s.id && <CheckCircle2 size={20} className="absolute top-2 right-2 text-white" />}
                         {s.icon}
                         <span className="text-[10px] font-black uppercase">{s.label}</span>
@@ -1352,7 +1455,7 @@ const App = () => {
                 </div>
               </div>
             </div>
-            <button onClick={() => { if (validateCompanyData()) { setRegistrationModules(getModulesBySector(companyData.sector)); setView('audit'); } }} className="w-full py-5 bg-slate-900 text-white rounded-3xl font-black active:bg-teal-500 active:scale-95 flex items-center justify-center gap-2">Continuar Registro <ChevronRight size={20}/></button>
+            <button onClick={() => { if (validateCompanyData()) { setRegistrationModules(getModulesBySector(companyData.sector)); setView('audit'); } }} className="w-full py-5 bg-slate-900 text-white rounded-3xl font-black active:bg-teal-500 flex items-center justify-center gap-2">Continuar Registro <ChevronRight size={20}/></button>
           </div>
         )}
 
@@ -1365,8 +1468,8 @@ const App = () => {
             <>
               {(() => { if (companyData.rif && !localStorage.getItem('progress_loaded')) { loadProgressLocally(); localStorage.setItem('progress_loaded', 'true'); } return null; })()}
               <div className="max-w-xl mx-auto space-y-4">
-                <div className="bg-white p-4 rounded-2xl shadow">
-                  <div className="flex justify-between text-xs font-black text-slate-500 mb-1">
+                <div className={`p-4 rounded-2xl shadow ${contrastMode === 'high-contrast' ? 'bg-black border border-white' : 'bg-white'} ${contrastMode === 'yellow-on-black' ? 'bg-black border border-yellow-300' : ''}`}>
+                  <div className={`flex justify-between text-xs font-black mb-1 ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>
                     <span>Progreso</span>
                     <span>{currentModule + 1} de {totalModules} módulos</span>
                   </div>
@@ -1385,27 +1488,27 @@ const App = () => {
                 </div>
                 
                 {modules[currentModule]?.questions.map(q => (
-                  <div key={q.id} className="bg-white rounded-3xl shadow border p-6">
+                  <div key={q.id} className={`rounded-3xl shadow border p-6 ${contrastMode === 'high-contrast' ? 'bg-black border-white text-white' : 'bg-white'} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300 text-yellow-300' : ''}`}>
                     <div className="flex items-center justify-between gap-2 mb-4">
-                      <span className="text-[9px] font-black text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">{q.cat}</span>
-                      <button className="text-slate-400 hover:text-indigo-600 transition-colors" onClick={() => alert(`💡 Esta pregunta evalúa el aspecto "${q.cat}".`)}>
+                      <span className={`text-[9px] font-black px-3 py-1 rounded-full ${contrastMode === 'high-contrast' ? 'bg-yellow-300 text-black' : 'bg-indigo-50 text-indigo-600'} ${contrastMode === 'yellow-on-black' ? 'bg-yellow-300 text-black' : ''}`}>{q.cat}</span>
+                      <button className={`transition-colors ${contrastMode === 'high-contrast' ? 'text-white hover:text-yellow-300' : 'text-slate-400 hover:text-indigo-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300 hover:text-white' : ''}`} onClick={() => alert(`💡 Esta pregunta evalúa el aspecto "${q.cat}".`)}>
                         <HelpCircle size={16} />
                       </button>
                     </div>
                     <p className="text-base font-bold my-4 text-center">{q.text}</p>
                     <div className="grid grid-cols-4 gap-2 mb-4">
                       {[...Array(q.max+1).keys()].map(i => (
-                        <button key={i} onClick={() => handleAnswer(q.id, i)} className={`py-3 text-sm font-black rounded-xl border transition-all duration-150 flex items-center justify-center gap-1 ${answers[q.id] === i ? 'bg-emerald-600 border-emerald-600 text-white shadow-md scale-[1.02]' : 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200 hover:border-slate-400'}`}>
+                        <button key={i} onClick={() => handleAnswer(q.id, i)} className={`py-3 text-sm font-black rounded-xl border transition-all duration-150 flex items-center justify-center gap-1 ${answers[q.id] === i ? 'bg-emerald-600 border-emerald-600 text-white shadow-md scale-[1.02]' : 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200 hover:border-slate-400'} ${contrastMode === 'high-contrast' ? (answers[q.id] === i ? 'bg-yellow-300 text-black border-yellow-300' : 'bg-black text-white border-white') : ''} ${contrastMode === 'yellow-on-black' ? (answers[q.id] === i ? 'bg-yellow-300 text-black border-yellow-300' : 'bg-black text-yellow-300 border-yellow-300') : ''}`}>
                           {answers[q.id] === i && <span className="text-base">✓</span>}
                           {i}
                         </button>
                       ))}
                     </div>
-                    <div className="border-t pt-4">
+                    <div className={`border-t pt-4 ${contrastMode === 'high-contrast' ? 'border-white' : ''} ${contrastMode === 'yellow-on-black' ? 'border-yellow-300' : ''}`}>
                       <p className="text-xs font-bold mb-2">Evidencias (máx 3):</p>
                       <div className="flex gap-2">
                         {[0,1,2].map(idx => (
-                          <button key={idx} id={`btn-${q.id}-${idx}`} onClick={() => handlePhotoUpload(q.id, idx)} className={`px-3 py-1 rounded-lg text-xs font-black active:bg-teal-500 ${evidences[q.id]?.[idx] ? 'bg-green-100' : 'bg-slate-100'}`}>
+                          <button key={idx} id={`btn-${q.id}-${idx}`} onClick={() => handlePhotoUpload(q.id, idx)} className={`px-3 py-1 rounded-lg text-xs font-black active:bg-teal-500 ${evidences[q.id]?.[idx] ? 'bg-green-100' : 'bg-slate-100'} ${contrastMode === 'high-contrast' ? (evidences[q.id]?.[idx] ? 'bg-yellow-300 text-black' : 'bg-black text-white border border-white') : ''} ${contrastMode === 'yellow-on-black' ? (evidences[q.id]?.[idx] ? 'bg-yellow-300 text-black' : 'bg-black text-yellow-300 border border-yellow-300') : ''}`}>
                             <Camera size={14}/> {evidences[q.id]?.[idx] ? 'Foto' : `Subir ${idx+1}`}
                           </button>
                         ))}
@@ -1435,9 +1538,9 @@ const App = () => {
         {/* ========== RESULTADOS ========== */}
         {view === 'results' && (
           <div id="report-content" className="max-w-md mx-auto space-y-6 pb-32">
-            <div className="bg-white p-6 rounded-3xl shadow-xl text-center">
+            <div className={`p-6 rounded-3xl shadow-xl text-center ${contrastMode === 'high-contrast' ? 'bg-black border border-white text-white' : 'bg-white'} ${contrastMode === 'yellow-on-black' ? 'bg-black border border-yellow-300 text-yellow-300' : ''}`}>
               <h2 className="text-2xl font-black">Resultados de Accesibilidad</h2>
-              <p className="text-slate-500">{companyData.name}</p>
+              <p className={`${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{companyData.name}</p>
               <div className="mt-6 space-y-4 text-left">
                 {getCurrentModules().map(mod => { const st = getModuleScore(mod.id); return st.max > 0 && (
                   <div key={mod.id}>
@@ -1459,28 +1562,28 @@ const App = () => {
         {view === 'adminDashboard' && userRole === 'admin' && (
           <div className="max-w-7xl mx-auto space-y-8">
             <div className="flex justify-between items-center flex-wrap gap-4">
-              <h2 className="text-2xl font-black">Panel de Administrador</h2>
+              <h2 className={`text-2xl font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Panel de Administrador</h2>
               <div className="flex gap-2">
-                <button onClick={() => setView('home')} className="bg-slate-200 px-4 py-2 rounded-xl text-sm font-black active:bg-teal-500">← Volver</button>
-                <button onClick={handleLogout} className="bg-red-100 text-red-700 px-4 py-2 rounded-xl text-sm font-black active:bg-teal-500">Cerrar sesión</button>
+                <button onClick={() => setView('home')} className={`px-4 py-2 rounded-xl text-sm font-black active:bg-teal-500 ${contrastMode === 'high-contrast' ? 'bg-black text-white border border-white' : 'bg-slate-200'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border border-yellow-300' : ''}`}>← Volver</button>
+                <button onClick={handleLogout} className={`px-4 py-2 rounded-xl text-sm font-black active:bg-teal-500 ${contrastMode === 'high-contrast' ? 'bg-black text-red-400 border border-red-400' : 'bg-red-100 text-red-700'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-red-400 border border-red-400' : ''}`}>Cerrar sesión</button>
               </div>
             </div>
 
-            {/* Gestion de Usuarios */}
-            <div className="bg-white rounded-2xl shadow p-6">
+            {/* Gestión de Usuarios */}
+            <div className={`rounded-2xl shadow p-6 ${contrastMode === 'high-contrast' ? 'bg-black border border-white' : 'bg-white'} ${contrastMode === 'yellow-on-black' ? 'bg-black border border-yellow-300' : ''}`}>
               <div className="flex justify-between items-center mb-4">
-                <h3 className="text-xl font-black flex items-center gap-2"><Users size={24} className="text-indigo-600"/> Gestión de Usuarios</h3>
-                <button onClick={() => setAuthView(authView === 'login' ? 'register' : 'login')} className="text-indigo-600 text-sm font-black">
+                <h3 className={`text-xl font-black flex items-center gap-2 ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}><Users size={24} className={`${contrastMode === 'high-contrast' ? 'text-yellow-300' : 'text-indigo-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}/> Gestión de Usuarios</h3>
+                <button onClick={() => setAuthView(authView === 'login' ? 'register' : 'login')} className={`text-sm font-black ${contrastMode === 'high-contrast' ? 'text-yellow-300' : 'text-indigo-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>
                   {authView === 'login' ? '➕ Crear nuevo usuario' : '← Volver a lista'}
                 </button>
               </div>
 
               {authView === 'register' && (
-                <form onSubmit={handleRegisterUser} className="bg-slate-50 p-4 rounded-xl mb-4">
+                <form onSubmit={handleRegisterUser} className={`p-4 rounded-xl mb-4 ${contrastMode === 'high-contrast' ? 'bg-black border border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black border border-yellow-300' : ''}`}>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                    <input type="email" placeholder="Email del usuario" className="border rounded-xl px-4 py-2" value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} required />
-                    <input type="password" placeholder="Contraseña" className="border rounded-xl px-4 py-2" value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} required />
-                    <select className="border rounded-xl px-4 py-2" value={newUserRole} onChange={e => setNewUserRole(e.target.value)}>
+                    <input type="email" placeholder="Email del usuario" className={`border rounded-xl px-4 py-2 ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : ''} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} required />
+                    <input type="password" placeholder="Contraseña" className={`border rounded-xl px-4 py-2 ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : ''} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} required />
+                    <select className={`border rounded-xl px-4 py-2 ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : ''} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={newUserRole} onChange={e => setNewUserRole(e.target.value)}>
                       <option value="user">Usuario</option>
                       <option value="admin">Administrador</option>
                     </select>
@@ -1493,31 +1596,32 @@ const App = () => {
 
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
+                  <thead className={`${contrastMode === 'high-contrast' ? 'bg-black' : 'bg-gray-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black' : ''}`}>
                     <tr>
-                      <th className="px-4 py-3 text-left text-xs font-black text-gray-500 uppercase">Email</th>
-                      <th className="px-4 py-3 text-left text-xs font-black text-gray-500 uppercase">Rol</th>
-                      <th className="px-4 py-3 text-left text-xs font-black text-gray-500 uppercase">Fecha</th>
-                      <th className="px-4 py-3 text-left text-xs font-black text-gray-500 uppercase">Acciones</th>
+                      <th className={`px-4 py-3 text-left text-xs font-black uppercase ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Email</th>
+                      <th className={`px-4 py-3 text-left text-xs font-black uppercase ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Rol</th>
+                      <th className={`px-4 py-3 text-left text-xs font-black uppercase ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Fecha</th>
+                      <th className={`px-4 py-3 text-left text-xs font-black uppercase ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Acciones</th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className={`${contrastMode === 'high-contrast' ? 'bg-black divide-white' : 'bg-white divide-gray-200'} ${contrastMode === 'yellow-on-black' ? 'bg-black divide-yellow-300' : ''}`}>
                     {allUsers.map(u => (
-                      <tr key={u.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 text-sm">{u.email}</td>
+                      <tr key={u.id} className={`${contrastMode === 'high-contrast' ? 'hover:bg-gray-800' : 'hover:bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'hover:bg-gray-800' : ''}`}>
+                        <td className={`px-4 py-3 text-sm ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{u.email}</td>
                         <td className="px-4 py-3">
-                          <span className={`px-2 py-1 rounded-full text-xs font-black ${u.role === 'admin' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>
+                          <span className={`px-2 py-1 rounded-full text-xs font-black ${u.role === 'admin' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'} ${contrastMode === 'high-contrast' ? (u.role === 'admin' ? 'bg-yellow-300 text-black' : 'bg-white text-black') : ''} ${contrastMode === 'yellow-on-black' ? (u.role === 'admin' ? 'bg-yellow-300 text-black' : 'bg-white text-black') : ''}`}>
                             {u.role === 'admin' ? 'ADMIN' : 'USUARIO'}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-sm">{new Date(u.created_at).toLocaleDateString()}</td>
-                        <td className="px-4 py-3 flex gap-2">
+                        <td className={`px-4 py-3 text-sm ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{new Date(u.created_at).toLocaleDateString()}</td>
+                        <td className="px-4 py-3 flex gap-2 flex-wrap">
                           {u.role === 'admin' ? (
-                            <button onClick={() => cambiarRolUsuario(u.id, 'user')} className="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded-lg">Degradar</button>
+                            <button onClick={() => cambiarRolUsuario(u.id, 'user')} className={`text-xs px-2 py-1 rounded-lg ${contrastMode === 'high-contrast' ? 'bg-yellow-300 text-black' : 'bg-yellow-100 text-yellow-700'} ${contrastMode === 'yellow-on-black' ? 'bg-yellow-300 text-black' : ''}`}>Degradar</button>
                           ) : (
-                            <button onClick={() => cambiarRolUsuario(u.id, 'admin')} className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded-lg">Promover</button>
+                            <button onClick={() => cambiarRolUsuario(u.id, 'admin')} className={`text-xs px-2 py-1 rounded-lg ${contrastMode === 'high-contrast' ? 'bg-yellow-300 text-black' : 'bg-indigo-100 text-indigo-700'} ${contrastMode === 'yellow-on-black' ? 'bg-yellow-300 text-black' : ''}`}>Promover</button>
                           )}
-                          <button onClick={() => eliminarUsuario(u.id)} className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-lg">Eliminar</button>
+                          <button onClick={() => enviarResetPassword(u.email)} className={`text-xs px-2 py-1 rounded-lg ${contrastMode === 'high-contrast' ? 'bg-blue-300 text-black' : 'bg-blue-100 text-blue-700'} ${contrastMode === 'yellow-on-black' ? 'bg-blue-300 text-black' : ''}`}>Restablecer</button>
+                          <button onClick={() => eliminarUsuario(u.id)} className={`text-xs px-2 py-1 rounded-lg ${contrastMode === 'high-contrast' ? 'bg-red-300 text-black' : 'bg-red-100 text-red-700'} ${contrastMode === 'yellow-on-black' ? 'bg-red-300 text-black' : ''}`}>Eliminar</button>
                         </td>
                       </tr>
                     ))}
@@ -1527,25 +1631,51 @@ const App = () => {
             </div>
 
             {/* Resumen por estado */}
-            <div className="bg-white rounded-2xl shadow p-6">
-              <h3 className="text-xl font-black mb-4 flex items-center gap-2"><BarChart size={24} className="text-indigo-600"/> Resumen por estado</h3>
-              <div className="overflow-x-auto"><table className="min-w-full divide-y divide-gray-200"><thead className="bg-gray-50"><tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Empresas</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Promedio accesibilidad</th></tr></thead><tbody className="bg-white divide-y divide-gray-200">{statsByState.map((stat, idx) => (<tr key={idx} className="hover:bg-gray-50 cursor-pointer" onClick={() => filtrarPorEstado(stat.estado)}><td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{stat.estado}</td><td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{stat.cantidad}</td><td className="px-6 py-4 whitespace-nowrap"><div className="flex items-center gap-2"><div className="w-24 bg-gray-200 rounded-full h-2"><div className={`h-2 rounded-full ${getPctColor(stat.promedio)}`} style={{ width: `${stat.promedio}%` }}></div></div><span className="text-sm font-bold">{stat.promedio}%</span></div></td></tr>))}</tbody></table></div>
+            <div className={`rounded-2xl shadow p-6 ${contrastMode === 'high-contrast' ? 'bg-black border border-white' : 'bg-white'} ${contrastMode === 'yellow-on-black' ? 'bg-black border border-yellow-300' : ''}`}>
+              <h3 className={`text-xl font-black mb-4 flex items-center gap-2 ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}><BarChart size={24} className={`${contrastMode === 'high-contrast' ? 'text-yellow-300' : 'text-indigo-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}/> Resumen por estado</h3>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className={`${contrastMode === 'high-contrast' ? 'bg-black' : 'bg-gray-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black' : ''}`}>
+                    <tr>
+                      <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Estado</th>
+                      <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Empresas</th>
+                      <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Promedio accesibilidad</th>
+                    </tr>
+                  </thead>
+                  <tbody className={`${contrastMode === 'high-contrast' ? 'bg-black divide-white' : 'bg-white divide-gray-200'} ${contrastMode === 'yellow-on-black' ? 'bg-black divide-yellow-300' : ''}`}>
+                    {statsByState.map((stat, idx) => (
+                      <tr key={idx} className={`${contrastMode === 'high-contrast' ? 'hover:bg-gray-800' : 'hover:bg-gray-50'} ${contrastMode === 'yellow-on-black' ? 'hover:bg-gray-800' : ''} cursor-pointer`} onClick={() => filtrarPorEstado(stat.estado)}>
+                        <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-900'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{stat.estado}</td>
+                        <td className={`px-6 py-4 whitespace-nowrap text-sm ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{stat.cantidad}</td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <div className="w-24 bg-gray-200 rounded-full h-2">
+                              <div className={`h-2 rounded-full ${getPctColor(stat.promedio)}`} style={{ width: `${stat.promedio}%` }}></div>
+                            </div>
+                            <span className={`text-sm font-bold ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{stat.promedio}%</span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             {/* Buscador por RIF */}
-            <div className="bg-white p-6 rounded-2xl shadow">
-              <h3 className="text-lg font-black mb-4">Buscar empresa por RIF</h3>
+            <div className={`p-6 rounded-2xl shadow ${contrastMode === 'high-contrast' ? 'bg-black border border-white' : 'bg-white'} ${contrastMode === 'yellow-on-black' ? 'bg-black border border-yellow-300' : ''}`}>
+              <h3 className={`text-lg font-black mb-4 ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Buscar empresa por RIF</h3>
               <div className="flex flex-col sm:flex-row gap-3">
-                <input type="text" placeholder="Ingrese RIF" className="flex-1 border rounded-xl px-4 py-3 text-center uppercase" value={searchRif} onChange={(e) => setSearchRif(e.target.value.toUpperCase())} />
+                <input type="text" placeholder="Ingrese RIF" className={`flex-1 border rounded-xl px-4 py-3 text-center uppercase ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : ''} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={searchRif} onChange={(e) => setSearchRif(e.target.value.toUpperCase())} />
                 <button onClick={buscarEmpresaPorRif} disabled={loadingSearch} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black active:bg-teal-500 disabled:opacity-50">
                   {loadingSearch ? 'Buscando...' : 'Buscar'}
                 </button>
               </div>
               {searchResult && (
-                <div className="mt-4 p-4 border rounded-xl bg-slate-50">
+                <div className={`mt-4 p-4 border rounded-xl ${contrastMode === 'high-contrast' ? 'bg-black border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300' : ''}`}>
                   {searchResult.found ? (
                     <div className="flex justify-between items-center flex-wrap gap-2">
-                      <div><p className="font-bold">{searchResult.empresa.name}</p><p className="text-xs text-slate-500">RIF: {searchResult.empresa.rif} | Score: {searchResult.empresa.total_percentage}%</p></div>
+                      <div><p className={`font-bold ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{searchResult.empresa.name}</p><p className={`text-xs ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>RIF: {searchResult.empresa.rif} | Score: {searchResult.empresa.total_percentage}%</p></div>
                       <button onClick={() => generateCompanyReportWord(searchResult.empresa)} className="bg-green-600 text-white px-4 py-2 rounded-xl text-sm font-black active:bg-teal-500">📄 Reporte Word</button>
                     </div>
                   ) : (
@@ -1556,11 +1686,11 @@ const App = () => {
             </div>
 
             {/* Listado de empresas */}
-            <div className="bg-white rounded-2xl shadow p-6">
+            <div className={`rounded-2xl shadow p-6 ${contrastMode === 'high-contrast' ? 'bg-black border border-white' : 'bg-white'} ${contrastMode === 'yellow-on-black' ? 'bg-black border border-yellow-300' : ''}`}>
               <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
-                <h3 className="text-lg font-black">Empresas Registradas</h3>
+                <h3 className={`text-lg font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Empresas Registradas</h3>
                 <div className="flex gap-3">
-                  <select value={selectedState} onChange={(e) => filtrarPorEstado(e.target.value)} className="border rounded-xl px-4 py-2 text-sm font-black bg-white">
+                  <select value={selectedState} onChange={(e) => filtrarPorEstado(e.target.value)} className={`border rounded-xl px-4 py-2 text-sm font-black ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-white'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`}>
                     <option value="">Todos los estados</option>
                     {venezuelaStates.map(state => (<option key={state} value={state}>{state}</option>))}
                   </select>
@@ -1569,17 +1699,28 @@ const App = () => {
               </div>
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
-                  <thead><tr><th className="px-4 py-3 text-left text-xs font-black">#</th><th className="px-4 py-3 text-left text-xs font-black">Empresa</th><th className="px-4 py-3 text-left text-xs font-black">RIF</th><th className="px-4 py-3 text-left text-xs font-black">Sector</th><th className="px-4 py-3 text-left text-xs font-black">Estado</th><th className="px-4 py-3 text-left text-xs font-black">Score</th><th className="px-4 py-3 text-left text-xs font-black">Usuario</th><th className="px-4 py-3 text-left text-xs font-black">Acción</th></tr></thead>
-                  <tbody>
-                    {filteredCompanies.length === 0 ? (<tr><td colSpan="8" className="text-center py-8 text-gray-500">No hay empresas</td></tr>) : filteredCompanies.map((emp, idx) => (
-                      <tr key={emp.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 text-sm font-bold">{idx+1}</td>
-                        <td className="px-4 py-3 text-sm">{emp.name}</td>
-                        <td className="px-4 py-3 text-sm">{emp.rif}</td>
-                        <td className="px-4 py-3 text-sm">{emp.sector}</td>
-                        <td className="px-4 py-3 text-sm">{emp.address ? emp.address.split(',').pop()?.trim() : 'N/A'}</td>
+                  <thead className={`${contrastMode === 'high-contrast' ? 'bg-black' : 'bg-gray-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black' : ''}`}>
+                    <tr>
+                      <th className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>#</th>
+                      <th className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Empresa</th>
+                      <th className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>RIF</th>
+                      <th className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Sector</th>
+                      <th className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Estado</th>
+                      <th className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Score</th>
+                      <th className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Usuario</th>
+                      <th className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody className={`${contrastMode === 'high-contrast' ? 'bg-black divide-white' : 'bg-white divide-gray-200'} ${contrastMode === 'yellow-on-black' ? 'bg-black divide-yellow-300' : ''}`}>
+                    {filteredCompanies.length === 0 ? (<tr><td colSpan="8" className={`text-center py-8 ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>No hay empresas</td></tr>) : filteredCompanies.map((emp, idx) => (
+                      <tr key={emp.id} className={`${contrastMode === 'high-contrast' ? 'hover:bg-gray-800' : 'hover:bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'hover:bg-gray-800' : ''}`}>
+                        <td className={`px-4 py-3 text-sm font-bold ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{idx+1}</td>
+                        <td className={`px-4 py-3 text-sm ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{emp.name}</td>
+                        <td className={`px-4 py-3 text-sm ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{emp.rif}</td>
+                        <td className={`px-4 py-3 text-sm ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{emp.sector}</td>
+                        <td className={`px-4 py-3 text-sm ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{emp.address ? emp.address.split(',').pop()?.trim() : 'N/A'}</td>
                         <td className="px-4 py-3"><span className={`px-2 py-1 rounded-full text-xs font-black text-white ${getPctColor(emp.total_percentage || 0)}`}>{emp.total_percentage || 0}%</span></td>
-                        <td className="px-4 py-3 text-xs text-slate-500">{emp.user_id || 'Desconocido'}</td>
+                        <td className={`px-4 py-3 text-xs ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{emp.user_id || 'Desconocido'}</td>
                         <td className="px-4 py-3"><button onClick={() => generateCompanyReportWord(emp)} className="bg-indigo-600 text-white px-3 py-1 rounded-lg text-xs font-black">📄</button></td>
                       </tr>
                     ))}
@@ -1593,13 +1734,13 @@ const App = () => {
 
       {/* Navegación inferior */}
       {(view === 'home' || view === 'registration' || view === 'audit' || view === 'results' || view === 'about') && (
-        <nav className="bg-white/90 backdrop-blur-xl border-t fixed bottom-0 w-full flex justify-around items-center h-24 px-8 pb-6 shadow-lg z-50">
-          <button onClick={() => setView('home')} className="flex flex-col items-center gap-1.5 active:bg-teal-500 active:rounded-full active:p-1"><LayoutDashboard size={24} /><span className="text-[9px] font-black">Inicio</span></button>
-          <button onClick={() => setView('registration')} className="flex flex-col items-center gap-1.5 active:bg-teal-500 active:rounded-full active:p-1"><ClipboardList size={24} /><span className="text-[9px] font-black">Registrar</span></button>
+        <nav className={`bg-white/90 backdrop-blur-xl border-t fixed bottom-0 w-full flex justify-around items-center h-24 px-8 pb-6 shadow-lg z-50 ${contrastMode === 'high-contrast' ? 'bg-black border-white' : ''} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300' : ''}`}>
+          <button onClick={() => setView('home')} className={`flex flex-col items-center gap-1.5 active:bg-teal-500 active:rounded-full active:p-1 ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}><LayoutDashboard size={24} /><span className="text-[9px] font-black">Inicio</span></button>
+          <button onClick={() => setView('registration')} className={`flex flex-col items-center gap-1.5 active:bg-teal-500 active:rounded-full active:p-1 ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}><ClipboardList size={24} /><span className="text-[9px] font-black">Registrar</span></button>
           {userRole === 'admin' && (
-            <button onClick={() => { setView('adminDashboard'); cargarEmpresas(); cargarUsuarios(); }} className="flex flex-col items-center gap-1.5 active:bg-teal-500 active:rounded-full active:p-1"><Shield size={24} /><span className="text-[9px] font-black">Admin</span></button>
+            <button onClick={() => { setView('adminDashboard'); cargarEmpresas(); cargarUsuarios(); }} className={`flex flex-col items-center gap-1.5 active:bg-teal-500 active:rounded-full active:p-1 ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}><Shield size={24} /><span className="text-[9px] font-black">Admin</span></button>
           )}
-          <button onClick={() => setView('about')} className="flex flex-col items-center gap-1.5 active:bg-teal-500 active:rounded-full active:p-1"><Info size={24} /><span className="text-[9px] font-black">Acerca de</span></button>
+          <button onClick={() => setView('about')} className={`flex flex-col items-center gap-1.5 active:bg-teal-500 active:rounded-full active:p-1 ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}><Info size={24} /><span className="text-[9px] font-black">Acerca de</span></button>
         </nav>
       )}
     </div>
