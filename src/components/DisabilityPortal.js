@@ -407,6 +407,7 @@ const DisabilityPortal = ({ onBack }) => {
           <form onSubmit={handleLogin} className="space-y-4">
             <input
               type="email"
+              aria-label="Correo Electrónico"
               placeholder="Correo Electrónico"
               required
               className="w-full border rounded-xl px-4 py-3"
@@ -415,6 +416,7 @@ const DisabilityPortal = ({ onBack }) => {
             />
             <input
               type="password"
+              aria-label="Contraseña"
               placeholder="Contraseña"
               required
               className="w-full border rounded-xl px-4 py-3"
@@ -476,6 +478,7 @@ const DisabilityPortal = ({ onBack }) => {
           <form onSubmit={handleRegister} className="space-y-3">
             <input
               type="text"
+              aria-label="Nombre"
               placeholder="Nombre"
               required
               className="w-full border rounded-xl px-4 py-3"
@@ -484,6 +487,7 @@ const DisabilityPortal = ({ onBack }) => {
             />
             <input
               type="text"
+              aria-label="Apellido"
               placeholder="Apellido"
               required
               className="w-full border rounded-xl px-4 py-3"
@@ -492,6 +496,7 @@ const DisabilityPortal = ({ onBack }) => {
             />
             <input
               type="email"
+              aria-label="Correo Electrónico"
               placeholder="Correo Electrónico"
               required
               className="w-full border rounded-xl px-4 py-3"
@@ -500,6 +505,7 @@ const DisabilityPortal = ({ onBack }) => {
             />
             <input
               type="password"
+              aria-label="Contraseña, mínimo 6 caracteres"
               placeholder="Contraseña (mínimo 6 caracteres)"
               required
               minLength={6}
@@ -508,6 +514,7 @@ const DisabilityPortal = ({ onBack }) => {
               onChange={e => setFormData({ ...formData, password: e.target.value })}
             />
             <select
+              aria-label="Tipo de Discapacidad"
               required
               className="w-full border rounded-xl px-4 py-3"
               value={formData.disabilityType}
@@ -517,6 +524,7 @@ const DisabilityPortal = ({ onBack }) => {
               {disabilityTypes.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
             <select
+              aria-label="Estado donde vives"
               required
               className="w-full border rounded-xl px-4 py-3"
               value={formData.state}
@@ -527,6 +535,7 @@ const DisabilityPortal = ({ onBack }) => {
             </select>
             <input
               type="number"
+              aria-label="Edad"
               placeholder="Edad *"
               required
               min="1"
@@ -599,6 +608,7 @@ const DisabilityPortal = ({ onBack }) => {
               <form onSubmit={handleForgotPassword} className="space-y-4">
                 <input
                   type="email"
+                  aria-label="Correo Electrónico"
                   placeholder="Correo Electrónico"
                   required
                   className="w-full border rounded-xl px-4 py-3"
@@ -647,6 +657,7 @@ const DisabilityPortal = ({ onBack }) => {
           <form onSubmit={handleResetPassword} className="space-y-4">
             <input
               type="password"
+              aria-label="Nueva contraseña, mínimo 6 caracteres"
               placeholder="Nueva contraseña (mínimo 6 caracteres)"
               required
               minLength={6}
@@ -656,6 +667,7 @@ const DisabilityPortal = ({ onBack }) => {
             />
             <input
               type="password"
+              aria-label="Repite la nueva contraseña"
               placeholder="Repite la nueva contraseña"
               required
               minLength={6}
@@ -718,15 +730,17 @@ const DisabilityPortal = ({ onBack }) => {
         </div>
 
         {/* Filtros */}
-        <div className="bg-white p-4 rounded-2xl shadow mb-6 grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div role="group" aria-label="Filtros de búsqueda" className="bg-white p-4 rounded-2xl shadow mb-6 grid grid-cols-1 md:grid-cols-3 gap-3">
           <input
             type="text"
+            aria-label="Buscar por nombre"
             placeholder="🔍 Buscar por nombre..."
             className="border rounded-xl px-4 py-2"
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
           />
           <select
+            aria-label="Filtrar por estado"
             className="border rounded-xl px-4 py-2"
             value={selectedState}
             onChange={e => setSelectedState(e.target.value)}
@@ -735,6 +749,7 @@ const DisabilityPortal = ({ onBack }) => {
             {venezuelaStates.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
           <select
+            aria-label="Filtrar por sector"
             className="border rounded-xl px-4 py-2"
             value={selectedSector}
             onChange={e => setSelectedSector(e.target.value)}
