@@ -1244,7 +1244,7 @@ useEffect(() => {
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <div className="text-center">
+        <div role="status" className="text-center">
           <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-indigo-600 mx-auto"></div>
           <p className="mt-4 text-slate-600 font-bold">Cargando...</p>
         </div>
@@ -1291,7 +1291,7 @@ useEffect(() => {
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label className="text-xs font-black uppercase text-slate-400">Email</label>
+              <label className="text-xs font-black uppercase text-slate-600">Email</label>
               <input
                 type="email"
                 className="w-full border rounded-xl px-4 py-3 mt-1 focus:ring-2 focus:ring-indigo-500 outline-none"
@@ -1301,7 +1301,7 @@ useEffect(() => {
               />
             </div>
             <div>
-              <label className="text-xs font-black uppercase text-slate-400">Contraseña</label>
+              <label className="text-xs font-black uppercase text-slate-600">Contraseña</label>
               <input
                 type="password"
                 className="w-full border rounded-xl px-4 py-3 mt-1 focus:ring-2 focus:ring-indigo-500 outline-none"
@@ -1345,6 +1345,12 @@ useEffect(() => {
 
   return (
     <div className={`flex flex-col h-screen font-sans relative ${contrastClasses}`} style={textSizeStyle}>
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[100] focus:bg-white focus:text-indigo-700 focus:px-4 focus:py-2 focus:rounded-xl focus:font-black focus:shadow-lg"
+      >
+        Saltar al contenido principal
+      </a>
       <img
         src="/iaet-logo.png"
         alt="IAET"
@@ -1396,7 +1402,7 @@ useEffect(() => {
         </div>
       </header>
 
-      <main className={`flex-1 overflow-y-auto p-4 pb-32 ${contrastClasses}`}>
+      <main id="main-content" tabIndex={-1} className={`flex-1 overflow-y-auto p-4 pb-32 ${contrastClasses}`}>
         {/* ========== HOME ========== */}
         {view === 'home' && (
           <div className="max-w-4xl mx-auto space-y-8 pt-4">
@@ -1453,15 +1459,15 @@ useEffect(() => {
             </div>
 
             <div className={`p-6 rounded-3xl shadow border text-center ${contrastMode === 'high-contrast' ? 'bg-black border-white' : 'bg-white border-slate-100'} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300' : ''}`}>
-              <h3 className={`text-sm font-black uppercase tracking-widest mb-4 ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-400'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Aliados y apoyo</h3>
+              <h3 className={`text-sm font-black uppercase tracking-widest mb-4 ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Aliados y apoyo</h3>
               <div className="flex justify-center items-center gap-8 flex-wrap">
                 <img src="/iaet-logo.png" alt="IAET" className="h-12 w-auto opacity-70" />
                 <img src="/Logo-Omnitours.png" alt="Omnitours" className="h-12 w-auto opacity-70" />
-                <div className={`text-xs font-bold ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-400'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Instituto de Altos Estudios Transdisciplinarios</div>
+                <div className={`text-xs font-bold ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Instituto de Altos Estudios Transdisciplinarios</div>
               </div>
             </div>
 
-            <div className={`text-center text-xs ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-400'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>
+            <div className={`text-center text-xs ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>
               <p>App desarrollada por el <span className="font-bold">IAET</span></p>
               <p className="mt-1">Versión 3.0 - Evaluación por sectores</p>
             </div>
@@ -1505,12 +1511,12 @@ useEffect(() => {
                 <div><label className="text-[10px] font-black uppercase block text-center">Estado *</label><select className={`w-full border rounded-xl px-4 py-3 text-center ${registrationErrors.state ? 'border-red-500' : 'border-slate-200'} ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.state} onChange={e => setCompanyData({...companyData, state: e.target.value, city: ''})}><option value="">Seleccione</option>{venezuelaStates.map(s => <option key={s}>{s}</option>)}</select>{registrationErrors.state && <p className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.state}</p>}</div>
                 <div><label className="text-[10px] font-black uppercase block text-center">Municipio *</label><select className={`w-full border rounded-xl px-4 py-3 text-center ${registrationErrors.city ? 'border-red-500' : 'border-slate-200'} ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.city} onChange={e => setCompanyData({...companyData, city: e.target.value})} disabled={!companyData.state}><option value="">Seleccione</option>{(municipalities[companyData.state] || []).map(c => <option key={c}>{c}</option>)}</select>{registrationErrors.city && <p className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.city}</p>}</div>
                 <div><label className="text-[10px] font-black uppercase block text-center">Dirección exacta *</label><input className={`w-full border rounded-xl px-4 py-3 text-center ${registrationErrors.address ? 'border-red-500' : 'border-slate-200'} ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.address} onChange={e => setCompanyData({...companyData, address: e.target.value})} placeholder="Calle, número, referencia" />{registrationErrors.address && <p className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.address}</p>}</div>
-                <div className={`rounded-2xl overflow-hidden border h-40 relative flex items-center justify-center ${contrastMode === 'high-contrast' ? 'bg-black border-white' : 'bg-slate-100'} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300' : ''}`}><MapPin size={40} className={`${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-400'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`} /><span className={`absolute bottom-2 text-xs text-center px-2 ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Ubicación: {companyData.address}, {companyData.city}, {companyData.state}</span></div>
-                <div><label className="text-[10px] font-black uppercase block text-center">Sector * <span className="font-normal text-slate-400">(determina las preguntas)</span></label>
-                  <div className="grid grid-cols-2 gap-3">
+                <div className={`rounded-2xl overflow-hidden border h-40 relative flex items-center justify-center ${contrastMode === 'high-contrast' ? 'bg-black border-white' : 'bg-slate-100'} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300' : ''}`}><MapPin size={40} className={`${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`} /><span className={`absolute bottom-2 text-xs text-center px-2 ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Ubicación: {companyData.address}, {companyData.city}, {companyData.state}</span></div>
+                <div><span id="sector-group-label" className="text-[10px] font-black uppercase block text-center">Sector * <span className="font-normal text-slate-600">(determina las preguntas)</span></span>
+                  <div role="group" aria-labelledby="sector-group-label" className="grid grid-cols-2 gap-3">
                     {sectors.map(s => (
-                      <button key={s.id} onClick={() => setCompanyData({...companyData, sector: s.id})} className={`relative flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all duration-200 active:scale-95 ${companyData.sector === s.id ? 'bg-emerald-600 text-white border-emerald-600 shadow-lg scale-[1.02]' : 'bg-white text-slate-700 border-slate-200 hover:border-emerald-300 hover:bg-emerald-50'} ${contrastMode === 'high-contrast' ? (companyData.sector === s.id ? 'bg-yellow-300 text-black border-yellow-300' : 'bg-black text-white border-white') : ''} ${contrastMode === 'yellow-on-black' ? (companyData.sector === s.id ? 'bg-yellow-300 text-black border-yellow-300' : 'bg-black text-yellow-300 border-yellow-300') : ''}`}>
-                        {companyData.sector === s.id && <CheckCircle2 size={20} className="absolute top-2 right-2 text-white" />}
+                      <button key={s.id} aria-pressed={companyData.sector === s.id} onClick={() => setCompanyData({...companyData, sector: s.id})} className={`relative flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all duration-200 active:scale-95 ${companyData.sector === s.id ? 'bg-emerald-600 text-white border-emerald-600 shadow-lg scale-[1.02]' : 'bg-white text-slate-700 border-slate-200 hover:border-emerald-300 hover:bg-emerald-50'} ${contrastMode === 'high-contrast' ? (companyData.sector === s.id ? 'bg-yellow-300 text-black border-yellow-300' : 'bg-black text-white border-white') : ''} ${contrastMode === 'yellow-on-black' ? (companyData.sector === s.id ? 'bg-yellow-300 text-black border-yellow-300' : 'bg-black text-yellow-300 border-yellow-300') : ''}`}>
+                        {companyData.sector === s.id && <CheckCircle2 size={20} aria-hidden="true" className="absolute top-2 right-2 text-white" />}
                         {s.icon}
                         <span className="text-[10px] font-black uppercase">{s.label}</span>
                         <span className="text-[7px] opacity-70">{s.description}</span>
@@ -1557,7 +1563,7 @@ useEffect(() => {
                   <div key={q.id} className={`rounded-3xl shadow border p-6 ${contrastMode === 'high-contrast' ? 'bg-black border-white text-white' : 'bg-white'} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300 text-yellow-300' : ''}`}>
                     <div className="flex items-center justify-between gap-2 mb-4">
                       <span className={`text-[9px] font-black px-3 py-1 rounded-full ${contrastMode === 'high-contrast' ? 'bg-yellow-300 text-black' : 'bg-indigo-50 text-indigo-600'} ${contrastMode === 'yellow-on-black' ? 'bg-yellow-300 text-black' : ''}`}>{q.cat}</span>
-                      <button className={`transition-colors ${contrastMode === 'high-contrast' ? 'text-white hover:text-yellow-300' : 'text-slate-400 hover:text-indigo-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300 hover:text-white' : ''}`} onClick={() => alert(`💡 Esta pregunta evalúa el aspecto "${q.cat}".`)}>
+                      <button className={`transition-colors ${contrastMode === 'high-contrast' ? 'text-white hover:text-yellow-300' : 'text-slate-600 hover:text-indigo-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300 hover:text-white' : ''}`} onClick={() => alert(`💡 Esta pregunta evalúa el aspecto "${q.cat}".`)}>
                         <HelpCircle size={16} />
                       </button>
                     </div>
@@ -1663,10 +1669,10 @@ useEffect(() => {
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className={`${contrastMode === 'high-contrast' ? 'bg-black' : 'bg-gray-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black' : ''}`}>
                     <tr>
-                      <th className={`px-4 py-3 text-left text-xs font-black uppercase ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Email</th>
-                      <th className={`px-4 py-3 text-left text-xs font-black uppercase ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Rol</th>
-                      <th className={`px-4 py-3 text-left text-xs font-black uppercase ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Fecha</th>
-                      <th className={`px-4 py-3 text-left text-xs font-black uppercase ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Acciones</th>
+                      <th scope="col" className={`px-4 py-3 text-left text-xs font-black uppercase ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Email</th>
+                      <th scope="col" className={`px-4 py-3 text-left text-xs font-black uppercase ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Rol</th>
+                      <th scope="col" className={`px-4 py-3 text-left text-xs font-black uppercase ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Fecha</th>
+                      <th scope="col" className={`px-4 py-3 text-left text-xs font-black uppercase ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Acciones</th>
                     </tr>
                   </thead>
                   <tbody className={`${contrastMode === 'high-contrast' ? 'bg-black divide-white' : 'bg-white divide-gray-200'} ${contrastMode === 'yellow-on-black' ? 'bg-black divide-yellow-300' : ''}`}>
@@ -1701,9 +1707,9 @@ useEffect(() => {
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className={`${contrastMode === 'high-contrast' ? 'bg-black' : 'bg-gray-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black' : ''}`}>
                     <tr>
-                      <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Estado</th>
-                      <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Empresas</th>
-                      <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Promedio accesibilidad</th>
+                      <th scope="col" className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Estado</th>
+                      <th scope="col" className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Empresas</th>
+                      <th scope="col" className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Promedio accesibilidad</th>
                     </tr>
                   </thead>
                   <tbody className={`${contrastMode === 'high-contrast' ? 'bg-black divide-white' : 'bg-white divide-gray-200'} ${contrastMode === 'yellow-on-black' ? 'bg-black divide-yellow-300' : ''}`}>
@@ -1763,14 +1769,14 @@ useEffect(() => {
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className={`${contrastMode === 'high-contrast' ? 'bg-black' : 'bg-gray-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black' : ''}`}>
                     <tr>
-                      <th className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>#</th>
-                      <th className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Empresa</th>
-                      <th className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>RIF</th>
-                      <th className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Sector</th>
-                      <th className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Estado</th>
-                      <th className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Score</th>
-                      <th className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Usuario</th>
-                      <th className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Acción</th>
+                      <th scope="col" className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>#</th>
+                      <th scope="col" className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Empresa</th>
+                      <th scope="col" className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>RIF</th>
+                      <th scope="col" className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Sector</th>
+                      <th scope="col" className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Estado</th>
+                      <th scope="col" className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Score</th>
+                      <th scope="col" className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Usuario</th>
+                      <th scope="col" className={`px-4 py-3 text-left text-xs font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Acción</th>
                     </tr>
                   </thead>
                   <tbody className={`${contrastMode === 'high-contrast' ? 'bg-black divide-white' : 'bg-white divide-gray-200'} ${contrastMode === 'yellow-on-black' ? 'bg-black divide-yellow-300' : ''}`}>

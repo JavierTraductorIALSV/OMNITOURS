@@ -382,8 +382,9 @@ const DisabilityPortal = ({ onBack }) => {
   // ============ VISTA: CARGANDO ============
   if (view === 'loading') {
     return (
-      <div className="flex h-screen items-center justify-center bg-gradient-to-br from-purple-50 to-pink-50">
+      <div role="status" className="flex h-screen items-center justify-center bg-gradient-to-br from-purple-50 to-pink-50">
         <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-purple-600"></div>
+        <span className="sr-only">Cargando el portal…</span>
       </div>
     );
   }
@@ -398,7 +399,7 @@ const DisabilityPortal = ({ onBack }) => {
           <p className="text-center text-slate-500 text-sm mb-6">Inicia sesión para consultar lugares accesibles</p>
 
           {errorMsg && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-xs p-3 rounded-xl mb-4">
+            <div role="alert" className="bg-red-50 border border-red-200 text-red-700 text-xs p-3 rounded-xl mb-4">
               {errorMsg}
             </div>
           )}
@@ -448,7 +449,7 @@ const DisabilityPortal = ({ onBack }) => {
 
           <button
             onClick={() => onBack && onBack()}
-            className="mt-6 w-full text-slate-400 text-xs font-black"
+            className="mt-6 w-full text-slate-600 text-xs font-black"
           >
             ← Volver al inicio
           </button>
@@ -467,7 +468,7 @@ const DisabilityPortal = ({ onBack }) => {
           <p className="text-center text-slate-500 text-sm mb-6">Completa tus datos para acceder</p>
 
           {errorMsg && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-xs p-3 rounded-xl mb-4">
+            <div role="alert" className="bg-red-50 border border-red-200 text-red-700 text-xs p-3 rounded-xl mb-4">
               {errorMsg}
             </div>
           )}
@@ -554,7 +555,7 @@ const DisabilityPortal = ({ onBack }) => {
 
           <button
             onClick={() => onBack && onBack()}
-            className="mt-6 w-full text-slate-400 text-xs font-black"
+            className="mt-6 w-full text-slate-600 text-xs font-black"
           >
             ← Volver al inicio
           </button>
@@ -572,14 +573,14 @@ const DisabilityPortal = ({ onBack }) => {
           <h1 className="text-2xl font-black text-center mb-2 text-purple-700">Recuperar acceso</h1>
 
           {errorMsg && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-xs p-3 rounded-xl mb-4">
+            <div role="alert" className="bg-red-50 border border-red-200 text-red-700 text-xs p-3 rounded-xl mb-4">
               {errorMsg}
             </div>
           )}
 
           {resetSent ? (
             <div className="text-center">
-              <div className="bg-green-50 border border-green-200 text-green-700 text-sm p-4 rounded-xl mb-6">
+              <div role="status" className="bg-green-50 border border-green-200 text-green-700 text-sm p-4 rounded-xl mb-6">
                 Enviamos un enlace a <strong>{resetEmail}</strong>. Ábrelo desde este mismo
                 navegador o dispositivo para establecer tu nueva contraseña.
               </div>
@@ -617,7 +618,7 @@ const DisabilityPortal = ({ onBack }) => {
 
           <button
             onClick={() => { setView('login'); setErrorMsg(''); setResetSent(false); }}
-            className="mt-6 w-full text-slate-400 text-xs font-black"
+            className="mt-6 w-full text-slate-600 text-xs font-black"
           >
             ← Volver a iniciar sesión
           </button>
@@ -638,7 +639,7 @@ const DisabilityPortal = ({ onBack }) => {
           </p>
 
           {errorMsg && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-xs p-3 rounded-xl mb-4">
+            <div role="alert" className="bg-red-50 border border-red-200 text-red-700 text-xs p-3 rounded-xl mb-4">
               {errorMsg}
             </div>
           )}
@@ -677,7 +678,7 @@ const DisabilityPortal = ({ onBack }) => {
               setErrorMsg('');
               setView('login');
             }}
-            className="mt-6 w-full text-slate-400 text-xs font-black"
+            className="mt-6 w-full text-slate-600 text-xs font-black"
           >
             ← Volver a iniciar sesión
           </button>
@@ -745,8 +746,9 @@ const DisabilityPortal = ({ onBack }) => {
 
         {/* Resultados */}
         {loading ? (
-          <div className="text-center py-12">
+          <div role="status" className="text-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-600 mx-auto"></div>
+            <span className="sr-only">Cargando lugares accesibles…</span>
           </div>
         ) : filteredRecommendations.length === 0 ? (
           <div className="bg-white p-8 rounded-2xl text-center">
