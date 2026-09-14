@@ -8,7 +8,8 @@ import {
   HelpCircle, Award, Users, Shield, UserPlus, Trash2, Edit,
   AlertTriangle
 } from 'lucide-react';
-import { supabase } from './supabaseClient';
+import { supabase, IS_PASSWORD_RECOVERY } from './supabaseClient';
+import DisabilityPortal from './components/DisabilityPortal';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import { Document, Packer, Paragraph, TextRun, ImageRun, AlignmentType, Header } from 'docx';
@@ -205,6 +206,11 @@ const App = () => {
   const [newUserRole, setNewUserRole] = useState('user');
   const [allUsers, setAllUsers] = useState([]);
   const [authView, setAuthView] = useState('login');
+  // Al arrancar desde un enlace de recuperación hay que montar el portal de una vez:
+  // la lógica de montaje decide según disability_users, y un usuario cuyo registro
+  // anterior falló no tiene fila ahí, por lo que nunca llegaría a cambiar su contraseña.
+  const [showDisabilityPortal, setShowDisabilityPortal] = useState(IS_PASSWORD_RECOVERY);
+  const [visitCount, setVisitCount] = useState(0);
 
   // ========== ESTADOS DE ACCESIBILIDAD ==========
   const [contrastMode, setContrastMode] = useState('normal-contrast');
@@ -278,116 +284,181 @@ const App = () => {
   ];
 
   // ============================================================
-  // AUTENTICACIÓN ROBUSTA CON TIMEOUT
+  // ✅ CONTADOR DE VISITAS LOCAL (sin Supabase)
   // ============================================================
   useEffect(() => {
-    let isMounted = true;
-    let timeoutId = null;
+    try {
+      const stored = localStorage.getItem('omnitour_visits') || '0';
+      const count = parseInt(stored, 10) + 1;
+      localStorage.setItem('omnitour_visits', count.toString());
+      setVisitCount(count);
+    } catch (e) {
+      console.warn('No se pudo acceder al contador local');
+      setVisitCount(1);
+    }
+  }, []);
 
-    const getSession = async () => {
-      try {
-        // Timeout de 10 segundos
-        const timeoutPromise = new Promise((_, reject) => {
-          timeoutId = setTimeout(() => reject(new Error('Timeout de conexión con Supabase')), 10000);
-        });
+  // ============================================================
+  // ✅ AUTENTICACIÓN (EMPRESAS/ADMIN vs DISCAPACIDAD)
+  // ============================================================
+// ============================================================
+// ✅ AUTENTICACIÓN (con timeouts internos)
+// ============================================================
+useEffect(() => {
+  let isMounted = true;
+  let hardTimeout = null;
+  let authChangeTimeout = null;
 
-        const sessionPromise = supabase.auth.getSession();
-        const { data: { session }, error } = await Promise.race([sessionPromise, timeoutPromise]);
+  const checkIfDisabilityUser = async (userId) => {
+    try {
+      const { data } = await supabase
+        .from('disability_users')
+        .select('id')
+        .eq('user_id', userId)
+        .maybeSingle();
+      return !!data;
+    } catch (e) {
+      return false;
+    }
+  };
 
-        clearTimeout(timeoutId);
+  // Timeout de seguridad global: si en 4s no cargó nada, mostrar login
+  hardTimeout = setTimeout(() => {
+    if (isMounted) {
+      console.warn('⚠️ Autenticación lenta. Mostrando pantalla de login.');
+      setLoading(false);
+    }
+  }, 4000);
 
-        if (error) {
-          console.error('Error obteniendo sesión:', error);
-          if (isMounted) {
-            setLoading(false);
-            alert('Error de conexión con el servidor. Revisa tu internet y recarga.');
-          }
-          return;
-        }
-        if (session) {
-          setSession(session);
-          setUser(session.user);
-          try {
-            await obtenerRol(session.user.id);
-          } catch (roleError) {
-            console.error('Error al obtener rol:', roleError);
-            setUserRole('user');
-          }
-        }
-        if (isMounted) setLoading(false);
-      } catch (error) {
-        clearTimeout(timeoutId);
-        console.error('Error en autenticación:', error);
+  const initAuth = async () => {
+    try {
+      // 🔒 Timeout específico para getSession (máximo 3s)
+      const sessionResult = await Promise.race([
+        supabase.auth.getSession(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('getSession timeout')), 3000)
+        ),
+      ]);
+
+      const session = sessionResult?.data?.session;
+
+      if (!session) {
+        // No hay sesión activa → login
         if (isMounted) {
+          clearTimeout(hardTimeout);
           setLoading(false);
-          alert('Error de conexión con Supabase. Verifica tu conexión a internet.');
         }
+        return;
       }
-    };
 
-    getSession();
+      // 🔒 Timeout para verificación de discapacidad (máximo 2s)
+      let isDisability = false;
+      try {
+        isDisability = await Promise.race([
+          checkIfDisabilityUser(session.user.id),
+          new Promise((resolve) => setTimeout(() => resolve(false), 2000)),
+        ]);
+      } catch (e) {
+        isDisability = false;
+      }
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN') {
+      if (isDisability) {
+        if (isMounted) {
+          setShowDisabilityPortal(true);
+          clearTimeout(hardTimeout);
+          setLoading(false);
+        }
+        return;
+      }
+
+      // Usuario empresa/admin
+      if (isMounted) {
         setSession(session);
         setUser(session.user);
+
         try {
-          await obtenerRol(session.user.id);
-        } catch (roleError) {
-          console.error('Error al obtener rol en cambio de estado:', roleError);
+          await Promise.race([
+            obtenerRol(session.user.id),
+            new Promise((resolve) => setTimeout(() => resolve(), 2000)),
+          ]);
+        } catch (e) {
           setUserRole('user');
         }
-        setView('home');
+
+        clearTimeout(hardTimeout);
+        setLoading(false);
+      }
+    } catch (err) {
+      console.warn('Auth error (ignorado):', err.message);
+      if (isMounted) {
+        clearTimeout(hardTimeout);
+        setLoading(false);
+      }
+    }
+  };
+
+  initAuth();
+
+  const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+    if (authChangeTimeout) clearTimeout(authChangeTimeout);
+    authChangeTimeout = setTimeout(async () => {
+      if (event === 'SIGNED_IN' && session) {
+        let isDisability = false;
+        try {
+          isDisability = await checkIfDisabilityUser(session.user.id);
+        } catch (e) {}
+        if (isDisability) {
+          setSession(null);
+          setUser(null);
+          setUserRole(null);
+          setShowDisabilityPortal(true);
+        } else {
+          setSession(session);
+          setUser(session.user);
+          try { await obtenerRol(session.user.id); } catch(e) { setUserRole('user'); }
+          setView('home');
+        }
       } else if (event === 'SIGNED_OUT') {
         setSession(null);
         setUser(null);
         setUserRole(null);
         setView('home');
+        setShowDisabilityPortal(false);
       }
       if (isMounted) setLoading(false);
-    });
+    }, 300);
+  });
 
-    return () => {
-      isMounted = false;
-      clearTimeout(timeoutId);
-      authListener?.subscription?.unsubscribe();
-    };
-  }, []);
+  return () => {
+    isMounted = false;
+    if (hardTimeout) clearTimeout(hardTimeout);
+    if (authChangeTimeout) clearTimeout(authChangeTimeout);
+    authListener?.subscription?.unsubscribe();
+  };
+}, []);
+
 
   const obtenerRol = async (userId) => {
     try {
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Timeout al obtener perfil')), 5000)
-      );
-      const queryPromise = supabase
+      const { data, error } = await supabase
         .from('profiles')
         .select('role')
         .eq('id', userId)
         .maybeSingle();
 
-      const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
-
       if (error) {
-        console.error('Error al obtener rol:', error);
         setUserRole('user');
         return;
       }
       if (data) {
         setUserRole(data.role);
       } else {
-        // Crear perfil automáticamente
-        const { error: insertError } = await supabase
+        await supabase
           .from('profiles')
           .insert({ id: userId, email: user?.email || '', role: 'user' });
-        if (insertError) {
-          console.error('Error al crear perfil automático:', insertError);
-        } else {
-          console.log('Perfil creado automáticamente');
-        }
         setUserRole('user');
       }
     } catch (error) {
-      console.error('Error en obtenerRol:', error);
       setUserRole('user');
     }
   };
@@ -396,7 +467,7 @@ const App = () => {
     e.preventDefault();
     setLoading(true);
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const { error } = await supabase.auth.signInWithPassword({
         email: loginEmail,
         password: loginPassword,
       });
@@ -413,12 +484,16 @@ const App = () => {
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {}
+    setSession(null);
+    setUser(null);
+    setUserRole(null);
+    setView('home');
+    setShowDisabilityPortal(false);
   };
 
-  // ============================================================
-  // ADMIN: GESTIÓN DE USUARIOS
-  // ============================================================
   const handleRegisterUser = async (e) => {
     e.preventDefault();
     if (!newUserEmail || !newUserPassword) {
@@ -497,13 +572,9 @@ const App = () => {
     }
   };
 
-  // ============================================================
-  // CARGA DE EMPRESAS Y USUARIOS
-  // ============================================================
   const cargarEmpresas = async (userId) => {
     const uid = userId || user?.id;
     if (!uid) {
-      console.warn('No user id available to load companies');
       setAllCompanies([]);
       setFilteredCompanies([]);
       return;
@@ -614,9 +685,6 @@ const App = () => {
     return 'bg-red-500';
   };
 
-  // ============================================================
-  // FUNCIONES DE PUNTUACIÓN
-  // ============================================================
   const getModuleScore = (moduleId) => {
     const mod = getCurrentModules().find(m => m.id === moduleId);
     if (!mod) return { score: 0, max: 1, pct: 0 };
@@ -643,9 +711,7 @@ const App = () => {
   const getCurrentModules = () => {
     if (registrationModules.length > 0) return registrationModules;
     if (companyData.sector) {
-      const mods = getModulesBySector(companyData.sector);
-      setRegistrationModules(mods);
-      return mods;
+      return getModulesBySector(companyData.sector);
     }
     return [];
   };
@@ -672,9 +738,6 @@ const App = () => {
     return true;
   };
 
-  // ============================================================
-  // SUBIR FOTOS Y ANÁLISIS
-  // ============================================================
   const getQuestionText = (qId) => {
     const modules = getCurrentModules();
     for (let mod of modules) {
@@ -692,9 +755,6 @@ const App = () => {
     return `Se detectan elementos relacionados con: ${found.join(', ')}. La evidencia visual sugiere ${Math.random() > 0.5 ? 'cumplimiento parcial' : 'necesidad de mejora'}.`;
   };
 
-  // ============================================================
-  // GUARDADO LOCAL Y SINCRONIZACIÓN OFFLINE
-  // ============================================================
   const saveProgressLocally = () => {
     const progress = {
       answers,
@@ -774,9 +834,6 @@ const App = () => {
     };
   }, []);
 
-  // ============================================================
-  // PWA INSTALL
-  // ============================================================
   useEffect(() => {
     const handleBeforeInstallPrompt = (e) => {
       e.preventDefault();
@@ -793,9 +850,6 @@ const App = () => {
     }
   };
 
-  // ============================================================
-  // HANDLE ANSWER & PHOTO UPLOAD
-  // ============================================================
   const handleAnswer = (qId, val) => {
     setAnswers(prev => ({ ...prev, [qId]: val }));
     saveProgressLocally();
@@ -856,9 +910,6 @@ const App = () => {
     saveProgressLocally();
   };
 
-  // ============================================================
-  // VALIDACIÓN DE DATOS DE EMPRESA
-  // ============================================================
   const validateCompanyData = () => {
     const errors = {};
     if (!companyData.name.trim()) errors.name = 'El nombre comercial es obligatorio';
@@ -875,22 +926,10 @@ const App = () => {
     return Object.keys(errors).length === 0;
   };
 
-  // ============================================================
-  // ENVÍO DE CORREO CON REPORTE (placeholder)
-  // ============================================================
   const sendCompanyReportEmail = async (company, reportBlob) => {
-    try {
-      console.log('Reporte generado, pendiente de envío por correo.');
-      alert('📧 Reporte generado. Para enviarlo por correo, configura la Edge Function de Supabase.');
-    } catch (error) {
-      console.error('Error enviando correo:', error);
-      alert('⚠️ No se pudo enviar el reporte por correo. Descárgalo manualmente.');
-    }
+    console.log('Reporte generado, pendiente de envío por correo.');
   };
 
-  // ============================================================
-  // GUARDAR REGISTRO EN SUPABASE
-  // ============================================================
   const saveRegistrationToSupabase = async () => {
     try {
       const userId = user?.id;
@@ -909,7 +948,6 @@ const App = () => {
         return;
       }
 
-      // Insertar empresa
       const { data: company, error: companyError } = await supabase
         .from('companies')
         .insert({
@@ -925,14 +963,12 @@ const App = () => {
           user_id: userId,
         })
         .select()
-        .single();
+        .maybeSingle();
       if (companyError) throw companyError;
 
-      // Insertar respuestas
       const answersToInsert = Object.entries(answers).map(([qId, value]) => ({ company_id: company.id, question_id: qId, score: value }));
       if (answersToInsert.length) await supabase.from('answers').insert(answersToInsert);
 
-      // Insertar evidencias
       const evidencesToInsert = Object.entries(evidences).flatMap(([qId, photos]) =>
         photos.filter(p => p && p.url).map(p => ({
           company_id: company.id,
@@ -943,7 +979,6 @@ const App = () => {
       );
       if (evidencesToInsert.length) await supabase.from('evidences').insert(evidencesToInsert);
 
-      // Mensaje de éxito
       alert(
         `✅ ¡Carga exitosa!\n\n` +
         `Empresa: ${companyData.name}\n` +
@@ -953,7 +988,6 @@ const App = () => {
         `Se ha generado el reporte.`
       );
 
-      // Generar reporte Word
       try {
         const reportBlob = await generateCompanyReportWord(company, true);
         if (reportBlob) {
@@ -961,7 +995,6 @@ const App = () => {
         }
       } catch (reportError) {
         console.error('Error generando reporte:', reportError);
-        alert('El registro se completó, pero hubo un problema al generar el reporte.');
       }
 
       localStorage.removeItem('omnitour_progress');
@@ -973,9 +1006,6 @@ const App = () => {
     }
   };
 
-  // ============================================================
-  // FUNCIONES DE ADMIN Y REPORTE WORD
-  // ============================================================
   const getCategoryDescription = (name, pct) => {
     if (name === 'Infraestructura y Entorno Físico') {
       if (pct === 0) return `El módulo "${name}" es nulo. No se evidencia accesibilidad.`;
@@ -1023,7 +1053,7 @@ const App = () => {
       const { data: evidenciasData } = await supabase.from('evidences').select('*').eq('company_id', company.id);
 
       const sectorModules = getModulesBySector(company.sector);
-      
+
       const moduleScores = sectorModules.map(mod => {
         let score = 0, max = 0;
         mod.questions.forEach(q => {
@@ -1033,7 +1063,7 @@ const App = () => {
         const pct = max === 0 ? 0 : Math.round((score / max) * 100);
         return { name: mod.title, pct, description: getCategoryDescription(mod.title, pct) };
       });
-      
+
       const totalPct = moduleScores.reduce((acc, m) => acc + m.pct, 0) / moduleScores.length;
 
       let nivelTexto = '', trofeoImagen = '';
@@ -1125,14 +1155,10 @@ const App = () => {
         new Paragraph({ children: [new TextRun(totalPct >= 85 ? 'Excelente nivel global.' : totalPct >= 70 ? 'Buen nivel, atender áreas identificadas.' : totalPct >= 50 ? 'Nivel básico, plan de mejora urgente.' : 'Nivel crítico, intervención inmediata.')], alignment: AlignmentType.CENTER, spacing: { after: 400 } })
       );
 
-      // ========== RECOMENDACIONES DINÁMICAS ==========
       sections.push(new Paragraph({ children: [new TextRun({ text: 'Recomendaciones generales', bold: true, size: 20 })], spacing: { after: 200 } }));
       const recs = [];
-
-      // Primera recomendación siempre IAET
       recs.push('Recibir formación y capacitación en turismo accesible contactar con el IAET.');
 
-      // Recomendaciones según nivel
       if (totalPct >= 85) {
         recs.push('Mantener y mejorar aspectos menores identificados en el informe.');
         recs.push('Realizar auditorías periódicas para asegurar la continuidad de la accesibilidad.');
@@ -1155,7 +1181,6 @@ const App = () => {
       recs.forEach(rec => sections.push(new Paragraph({ children: [new TextRun(`• ${rec}`)], bullet: { level: 0 }, spacing: { after: 100 } })));
       sections.push(new Paragraph({ text: '', spacing: { after: 400 } }));
 
-      // Evidencias
       if (evidenciasData && evidenciasData.length > 0) {
         sections.push(new Paragraph({ children: [new TextRun({ text: 'Evidencias fotográficas y análisis de IA', bold: true, size: 20 })], spacing: { after: 200 } }));
         for (const ev of evidenciasData) {
@@ -1205,9 +1230,6 @@ const App = () => {
     }
   };
 
-  // ============================================================
-  // FUNCIONES DE ACCESIBILIDAD
-  // ============================================================
   const increaseFontSize = () => setFontSizeMultiplier(prev => Math.min(prev + 0.1, 2));
   const decreaseFontSize = () => setFontSizeMultiplier(prev => Math.max(prev - 0.1, 0.8));
   const cycleContrastMode = () => {
@@ -1230,16 +1252,43 @@ const App = () => {
     );
   }
 
+  if (showDisabilityPortal) {
+    return (
+      <DisabilityPortal
+        onBack={async () => {
+          setShowDisabilityPortal(false);
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+            const { data } = await supabase
+              .from('disability_users')
+              .select('id')
+              .eq('user_id', session.user.id)
+              .maybeSingle();
+            if (data) {
+              setShowDisabilityPortal(true);
+            } else {
+              setSession(session);
+              setUser(session.user);
+              await obtenerRol(session.user.id);
+            }
+          }
+        }}
+      />
+    );
+  }
+
   if (!user) {
     return (
-<div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full">
-  <img 
-    src="/Logo-Omnitours.png" 
-    alt="Omnitours" 
-    className="w-32 sm:w-40 md:w-48 lg:w-56 xl:w-64 mx-auto mb-6 h-auto" 
-  />
-  <h1 className="text-2xl font-black text-center mb-2">OmniTour</h1>
-  <p className="text-center text-slate-500 text-sm mb-6">Inicia sesión para continuar</p>
+      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 p-4">
+        <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full">
+          <img
+            src="/Logo-Omnitours.png"
+            alt="Omnitours"
+            className="w-32 sm:w-40 md:w-48 lg:w-56 mx-auto mb-6 h-auto"
+          />
+          <h1 className="text-2xl font-black text-center mb-2">OmniTour</h1>
+          <p className="text-center text-slate-500 text-sm mb-6">Inicia sesión para continuar</p>
+
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label className="text-xs font-black uppercase text-slate-400">Email</label>
@@ -1269,29 +1318,39 @@ const App = () => {
               {loading ? 'Cargando...' : 'Iniciar sesión'}
             </button>
           </form>
-          
+
+          <div className="mt-6 border-t pt-6">
+            <p className="text-center text-slate-500 text-xs font-bold mb-3">
+              ¿Eres una persona con discapacidad?
+            </p>
+            <button
+              onClick={() => setShowDisabilityPortal(true)}
+              className="w-full bg-purple-600 text-white py-3 rounded-xl font-black hover:bg-purple-700 active:scale-95 transition-all flex items-center justify-center gap-2"
+            >
+              ♿ Acceder al Portal de Discapacidad
+            </button>
+          </div>
+
           <div className="mt-6 text-center text-xs text-slate-500">
             <p>¿No tienes cuenta? Contacta al administrador.</p>
           </div>
         </div>
-      
+      </div>
     );
   }
 
-  // ============================================================
-  // APLICACIÓN PRINCIPAL
-  // ============================================================
   const textSizeStyle = { fontSize: `${fontSizeMultiplier * 1}rem` };
-  const contrastClasses = contrastMode === 'high-contrast' ? 'bg-black text-white' : 
+  const contrastClasses = contrastMode === 'high-contrast' ? 'bg-black text-white' :
                          contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300' : '';
 
   return (
     <div className={`flex flex-col h-screen font-sans relative ${contrastClasses}`} style={textSizeStyle}>
-      <img 
-  src="/iaet-logo.png" 
-  alt="IAET" 
-  className="fixed bottom-4 right-4 opacity-15 pointer-events-none z-50 w-10 sm:w-14 md:w-20 lg:w-24 xl:w-30"
-/>
+      <img
+        src="/iaet-logo.png"
+        alt="IAET"
+        className="fixed bottom-4 right-4 opacity-15 pointer-events-none z-50 w-10 sm:w-14 md:w-20 lg:w-24"
+      />
+
       {uploadMessage.show && (
         <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-4 py-2 rounded-full shadow-lg text-white text-sm font-bold ${uploadMessage.type === 'success' ? 'bg-green-500' : 'bg-red-500'}`}>
           {uploadMessage.text}
@@ -1300,12 +1359,12 @@ const App = () => {
 
       <header className={`bg-white/90 backdrop-blur-md p-4 shadow-sm flex justify-between items-center sticky top-0 z-50 border-b ${contrastMode === 'high-contrast' ? 'bg-black border-white' : ''} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300' : ''}`}>
         <div className="flex items-center gap-3">
-        <img 
-      src="/Logo-Omnitours.png" 
-      alt="Omnitours" 
-      className="h-16 sm:h-12 md:h-14 lg:h-16 xl:h-20 w-auto" 
-    />
-    <div className="text-xs">
+          <img
+            src="/Logo-Omnitours.png"
+            alt="Omnitours"
+            className="h-12 sm:h-14 md:h-16 lg:h-20 xl:h-24 w-auto"
+          />
+          <div className="text-xs">
             <span className={`font-black ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-800'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{user.email}</span>
             <span className={`ml-2 px-2 py-0.5 rounded-full text-[8px] font-black ${userRole === 'admin' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'} ${contrastMode === 'high-contrast' ? (userRole === 'admin' ? 'bg-yellow-300 text-black' : 'bg-white text-black') : ''} ${contrastMode === 'yellow-on-black' ? (userRole === 'admin' ? 'bg-yellow-300 text-black' : 'bg-white text-black') : ''}`}>
               {userRole === 'admin' ? 'ADMIN' : 'USUARIO'}
@@ -1316,13 +1375,13 @@ const App = () => {
           <button onClick={increaseFontSize} className={`p-1 rounded-full hover:bg-slate-200 active:bg-teal-500 ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}><Type size={18} /></button>
           <button onClick={decreaseFontSize} className={`p-1 rounded-full hover:bg-slate-200 active:bg-teal-500 ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}><Type size={18} /></button>
           <button onClick={cycleContrastMode} className={`p-1 rounded-full hover:bg-slate-200 active:bg-teal-500 ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}><Contrast size={18} /></button>
-          
+
           {userRole === 'admin' && (
             <button onClick={() => { setView('adminDashboard'); cargarEmpresas(); cargarUsuarios(); }} className={`text-indigo-600 text-xs flex items-center gap-1 active:bg-teal-500 px-2 py-1 rounded-lg bg-indigo-50 ${contrastMode === 'high-contrast' ? 'bg-black text-yellow-300 border border-yellow-300' : ''} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border border-yellow-300' : ''}`}>
               <LayoutDashboard size={16} /> Panel Admin
             </button>
           )}
-          
+
           {deferredPrompt && (
             <button onClick={handleInstall} className="bg-green-600 text-white px-3 py-1 rounded-lg text-xs font-black active:bg-teal-500">
               📲 Instalar App
@@ -1386,11 +1445,18 @@ const App = () => {
               </div>
             </div>
 
+            {/* ✅ CONTADOR DE VISITAS LOCAL */}
+            <div className={`p-4 rounded-2xl shadow border text-center ${contrastMode === 'high-contrast' ? 'bg-black border-white' : 'bg-white border-slate-100'} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300' : ''}`}>
+              <p className={`text-xs font-bold ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>
+                👁️ Has visitado OmniTour <span className={`font-black ${contrastMode === 'high-contrast' ? 'text-yellow-300' : 'text-indigo-600'}`}>{visitCount}</span> {visitCount === 1 ? 'vez' : 'veces'}
+              </p>
+            </div>
+
             <div className={`p-6 rounded-3xl shadow border text-center ${contrastMode === 'high-contrast' ? 'bg-black border-white' : 'bg-white border-slate-100'} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300' : ''}`}>
               <h3 className={`text-sm font-black uppercase tracking-widest mb-4 ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-400'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Aliados y apoyo</h3>
               <div className="flex justify-center items-center gap-8 flex-wrap">
                 <img src="/iaet-logo.png" alt="IAET" className="h-12 w-auto opacity-70" />
-                <img src="/Logo-Omnitours.png" alt="Omnitours" className="h-20 w-auto" />
+                <img src="/Logo-Omnitours.png" alt="Omnitours" className="h-12 w-auto opacity-70" />
                 <div className={`text-xs font-bold ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-400'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Instituto de Altos Estudios Transdisciplinarios</div>
               </div>
             </div>
@@ -1477,7 +1543,7 @@ const App = () => {
                     <div className="bg-indigo-600 h-2 rounded-full transition-all duration-300" style={{ width: `${progress}%` }}></div>
                   </div>
                 </div>
-                
+
                 <div className="bg-indigo-600 p-6 rounded-3xl text-white shadow-xl">
                   <span className="text-[10px] font-black">Módulo {currentModule+1}/{totalModules}</span>
                   <h2 className="text-xl font-black">{modules[currentModule]?.title}</h2>
@@ -1486,7 +1552,7 @@ const App = () => {
                     <span className="inline-block mt-1 bg-yellow-400 text-indigo-900 text-[8px] font-black px-2 py-0.5 rounded-full">Específico del sector</span>
                   )}
                 </div>
-                
+
                 {modules[currentModule]?.questions.map(q => (
                   <div key={q.id} className={`rounded-3xl shadow border p-6 ${contrastMode === 'high-contrast' ? 'bg-black border-white text-white' : 'bg-white'} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300 text-yellow-300' : ''}`}>
                     <div className="flex items-center justify-between gap-2 mb-4">
@@ -1516,17 +1582,17 @@ const App = () => {
                     </div>
                   </div>
                 ))}
-                
+
                 <div className="flex gap-4 pt-4">
                   {currentModule > 0 && <button onClick={() => { setCurrentModule(m => m-1); saveProgressLocally(); }} className="flex-1 bg-white border py-4 rounded-2xl active:bg-teal-500">← Módulo anterior</button>}
                   {currentModule < totalModules - 1 ? (
                     <button onClick={() => { if (isCurrentModuleComplete()) { setCurrentModule(m => m+1); saveProgressLocally(); } }} className="flex-[2] bg-indigo-600 text-white py-4 rounded-2xl active:bg-teal-500">Siguiente módulo →</button>
                   ) : (
-                    <button onClick={async () => { 
-                      if (isCurrentModuleComplete()) { 
-                        await saveRegistrationToSupabase(); 
-                        setView('results'); 
-                      } 
+                    <button onClick={async () => {
+                      if (isCurrentModuleComplete()) {
+                        await saveRegistrationToSupabase();
+                        setView('results');
+                      }
                     }} className="flex-[2] bg-green-600 text-white py-4 rounded-2xl active:bg-teal-500">Finalizar</button>
                   )}
                 </div>
@@ -1569,7 +1635,6 @@ const App = () => {
               </div>
             </div>
 
-            {/* Gestión de Usuarios */}
             <div className={`rounded-2xl shadow p-6 ${contrastMode === 'high-contrast' ? 'bg-black border border-white' : 'bg-white'} ${contrastMode === 'yellow-on-black' ? 'bg-black border border-yellow-300' : ''}`}>
               <div className="flex justify-between items-center mb-4">
                 <h3 className={`text-xl font-black flex items-center gap-2 ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}><Users size={24} className={`${contrastMode === 'high-contrast' ? 'text-yellow-300' : 'text-indigo-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}/> Gestión de Usuarios</h3>
@@ -1630,7 +1695,6 @@ const App = () => {
               </div>
             </div>
 
-            {/* Resumen por estado */}
             <div className={`rounded-2xl shadow p-6 ${contrastMode === 'high-contrast' ? 'bg-black border border-white' : 'bg-white'} ${contrastMode === 'yellow-on-black' ? 'bg-black border border-yellow-300' : ''}`}>
               <h3 className={`text-xl font-black mb-4 flex items-center gap-2 ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}><BarChart size={24} className={`${contrastMode === 'high-contrast' ? 'text-yellow-300' : 'text-indigo-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}/> Resumen por estado</h3>
               <div className="overflow-x-auto">
@@ -1662,7 +1726,6 @@ const App = () => {
               </div>
             </div>
 
-            {/* Buscador por RIF */}
             <div className={`p-6 rounded-2xl shadow ${contrastMode === 'high-contrast' ? 'bg-black border border-white' : 'bg-white'} ${contrastMode === 'yellow-on-black' ? 'bg-black border border-yellow-300' : ''}`}>
               <h3 className={`text-lg font-black mb-4 ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Buscar empresa por RIF</h3>
               <div className="flex flex-col sm:flex-row gap-3">
@@ -1685,7 +1748,6 @@ const App = () => {
               )}
             </div>
 
-            {/* Listado de empresas */}
             <div className={`rounded-2xl shadow p-6 ${contrastMode === 'high-contrast' ? 'bg-black border border-white' : 'bg-white'} ${contrastMode === 'yellow-on-black' ? 'bg-black border border-yellow-300' : ''}`}>
               <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
                 <h3 className={`text-lg font-black ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Empresas Registradas</h3>
@@ -1732,7 +1794,6 @@ const App = () => {
         )}
       </main>
 
-      {/* Navegación inferior */}
       {(view === 'home' || view === 'registration' || view === 'audit' || view === 'results' || view === 'about') && (
         <nav className={`bg-white/90 backdrop-blur-xl border-t fixed bottom-0 w-full flex justify-around items-center h-24 px-8 pb-6 shadow-lg z-50 ${contrastMode === 'high-contrast' ? 'bg-black border-white' : ''} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300' : ''}`}>
           <button onClick={() => setView('home')} className={`flex flex-col items-center gap-1.5 active:bg-teal-500 active:rounded-full active:p-1 ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}><LayoutDashboard size={24} /><span className="text-[9px] font-black">Inicio</span></button>
