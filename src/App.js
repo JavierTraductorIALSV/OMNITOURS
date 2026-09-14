@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   LayoutDashboard, ClipboardList, Building2, Utensils, Plane,
   Bus, Palmtree, Library, Wind, MapPin, ArrowRight,
@@ -218,6 +218,8 @@ const App = () => {
 
   // ========== ESTADOS PRINCIPALES ==========
   const [view, setView] = useState('home');
+  const mainRef = useRef(null);
+  const viewYaMontada = useRef(false);
   const [currentModule, setCurrentModule] = useState(0);
   const [currentQuestionPage, setCurrentQuestionPage] = useState(0);
   const [answers, setAnswers] = useState({});
@@ -297,6 +299,30 @@ const App = () => {
       setVisitCount(1);
     }
   }, []);
+
+  // ============================================================
+  // ✅ FOCO AL CAMBIAR DE PANTALLA (WCAG 2.4.3)
+  // ============================================================
+  // Sin router: cada setView desmonta el botón que originó el cambio, así que
+  // el foco cae al <body> y el lector de pantalla no se entera de que hay una
+  // pantalla nueva. Se devuelve el foco al contenedor principal, que es el
+  // mismo destino del enlace "Saltar al contenido principal".
+  // El primer render se omite a propósito: robar el foco al cargar la app
+  // impediría empezar a leer desde la cabecera.
+  // También se escucha showDisabilityPortal: volver del portal remonta todo el
+  // shell sin cambiar `view`, y el botón "Volver" que originó el regreso ya no
+  // existe. Al abrirse el portal el efecto corre igual, pero mainRef es null
+  // porque <main> está desmontado y el guard lo descarta.
+  useEffect(() => {
+    if (!viewYaMontada.current) {
+      viewYaMontada.current = true;
+      return;
+    }
+    const node = mainRef.current;
+    if (!node) return;
+    node.focus({ preventScroll: true });
+    node.scrollTo({ top: 0 });
+  }, [view, showDisabilityPortal]);
 
   // ============================================================
   // ✅ AUTENTICACIÓN (EMPRESAS/ADMIN vs DISCAPACIDAD)
@@ -1404,7 +1430,7 @@ useEffect(() => {
         </div>
       </header>
 
-      <main id="main-content" tabIndex={-1} className={`flex-1 overflow-y-auto p-4 pb-32 ${contrastClasses}`}>
+      <main id="main-content" tabIndex={-1} ref={mainRef} className={`flex-1 overflow-y-auto p-4 pb-32 ${contrastClasses}`}>
         {/* ========== HOME ========== */}
         {view === 'home' && (
           <div className="max-w-4xl mx-auto space-y-8 pt-4">

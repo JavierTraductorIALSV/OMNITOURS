@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase, IS_PASSWORD_RECOVERY } from '../supabaseClient';
 import { MapPin, Star, CheckCircle, LogOut, ArrowRight, Award } from 'lucide-react';
 
@@ -23,6 +23,9 @@ const DisabilityPortal = ({ onBack }) => {
     disabilityType: '', state: '', age: ''
   });
 
+  const tituloRef = useRef(null);
+  const viewYaMontada = useRef(false);
+
   const disabilityTypes = ['Visual', 'Auditiva', 'Motriz', 'Intelectual', 'Psicosocial', 'Múltiple', 'Otra'];
 
   const venezuelaStates = [
@@ -42,6 +45,20 @@ const DisabilityPortal = ({ onBack }) => {
     { id: 'recreacional', label: 'Recreacional' },
     { id: 'playa', label: 'Servicios de Playa' },
   ];
+
+  // Sin router: cada setView desmonta el botón que originó el cambio y el foco
+  // cae al <body>, así que el lector de pantalla no se entera de que cambió la
+  // pantalla. El portal no tiene <main>, así que el destino estable es el
+  // título de la vista entrante. La vista 'loading' no tiene título y la ref
+  // queda en null, que es justo lo que cubre el guard.
+  useEffect(() => {
+    if (!viewYaMontada.current) {
+      viewYaMontada.current = true;
+      return;
+    }
+    tituloRef.current?.focus({ preventScroll: true });
+    window.scrollTo({ top: 0 });
+  }, [view]);
 
   useEffect(() => {
     let isMounted = true;
@@ -395,7 +412,7 @@ const DisabilityPortal = ({ onBack }) => {
       <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-purple-50 to-pink-50 p-4">
         <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full">
           <img src="/Logo-Omnitours.png" alt="Omnitours" className="w-32 mx-auto mb-6 h-auto" />
-          <h1 className="text-2xl font-black text-center mb-2 text-purple-700">Personas con Discapacidad</h1>
+          <h1 ref={tituloRef} tabIndex={-1} className="text-2xl font-black text-center mb-2 text-purple-700">Personas con Discapacidad</h1>
           <p className="text-center text-slate-500 text-sm mb-6">Inicia sesión para consultar lugares accesibles</p>
 
           {errorMsg && (
@@ -466,7 +483,7 @@ const DisabilityPortal = ({ onBack }) => {
       <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-purple-50 to-pink-50 p-4">
         <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full">
           <img src="/Logo-Omnitours.png" alt="Omnitours" className="w-32 mx-auto mb-6 h-auto" />
-          <h1 className="text-2xl font-black text-center mb-2 text-purple-700">Crear Cuenta</h1>
+          <h1 ref={tituloRef} tabIndex={-1} className="text-2xl font-black text-center mb-2 text-purple-700">Crear Cuenta</h1>
           <p className="text-center text-slate-500 text-sm mb-6">Completa tus datos para acceder</p>
 
           {errorMsg && (
@@ -579,7 +596,7 @@ const DisabilityPortal = ({ onBack }) => {
       <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-purple-50 to-pink-50 p-4">
         <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full">
           <img src="/Logo-Omnitours.png" alt="Omnitours" className="w-32 mx-auto mb-6 h-auto" />
-          <h1 className="text-2xl font-black text-center mb-2 text-purple-700">Recuperar acceso</h1>
+          <h1 ref={tituloRef} tabIndex={-1} className="text-2xl font-black text-center mb-2 text-purple-700">Recuperar acceso</h1>
 
           {errorMsg && (
             <div role="alert" className="bg-red-50 border border-red-200 text-red-700 text-xs p-3 rounded-xl mb-4">
@@ -643,7 +660,7 @@ const DisabilityPortal = ({ onBack }) => {
       <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-purple-50 to-pink-50 p-4">
         <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full">
           <img src="/Logo-Omnitours.png" alt="Omnitours" className="w-32 mx-auto mb-6 h-auto" />
-          <h1 className="text-2xl font-black text-center mb-2 text-purple-700">Nueva contraseña</h1>
+          <h1 ref={tituloRef} tabIndex={-1} className="text-2xl font-black text-center mb-2 text-purple-700">Nueva contraseña</h1>
           <p className="text-center text-slate-500 text-sm mb-6">
             Escribe la contraseña que usarás de ahora en adelante.
           </p>
@@ -705,7 +722,7 @@ const DisabilityPortal = ({ onBack }) => {
       <header className="bg-white shadow-md sticky top-0 z-40 p-4">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
           <div>
-            <h1 className="text-lg font-black text-purple-700">
+            <h1 ref={tituloRef} tabIndex={-1} className="text-lg font-black text-purple-700">
               Hola, {profile?.full_name || user?.email?.split('@')[0]} 👋
             </h1>
             <p className="text-xs text-slate-500">
