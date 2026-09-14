@@ -213,8 +213,35 @@ const App = () => {
   const [visitCount, setVisitCount] = useState(0);
 
   // ========== ESTADOS DE ACCESIBILIDAD ==========
-  const [contrastMode, setContrastMode] = useState('normal-contrast');
-  const [fontSizeMultiplier, setFontSizeMultiplier] = useState(1);
+  // Se leen en el inicializador y no en un efecto para que la app no pinte un
+  // render con los valores por defecto antes de aplicar los preferidos.
+  // El try/catch no es adorno: localStorage lanza en navegación privada y un
+  // error dentro del inicializador dejaría la app en blanco.
+  const [contrastMode, setContrastMode] = useState(() => {
+    try {
+      return localStorage.getItem('omnitour_contrast') || 'normal-contrast';
+    } catch (e) {
+      return 'normal-contrast';
+    }
+  });
+  const [fontSizeMultiplier, setFontSizeMultiplier] = useState(() => {
+    try {
+      const guardado = parseFloat(localStorage.getItem('omnitour_font_size'));
+      // Mismo rango que imponen los botones de aumentar/reducir
+      return Number.isFinite(guardado) ? Math.min(Math.max(guardado, 0.8), 2) : 1;
+    } catch (e) {
+      return 1;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('omnitour_contrast', contrastMode);
+      localStorage.setItem('omnitour_font_size', String(fontSizeMultiplier));
+    } catch (e) {
+      console.warn('No se pudieron guardar las preferencias de accesibilidad');
+    }
+  }, [contrastMode, fontSizeMultiplier]);
 
   // ========== ESTADOS PRINCIPALES ==========
   const [view, setView] = useState('home');
