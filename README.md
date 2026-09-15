@@ -63,23 +63,21 @@ Documentadas al 2026-09-14. Ordenadas por gravedad, no por antigüedad.
 
 ## Críticas: integridad de los datos
 
-### 1. El "Análisis IA" del reporte es texto aleatorio
+### 1. RESUELTA — El "Análisis IA" del reporte era texto aleatorio
 
-`analyzeImage()` en `src/App.js:803-809` no mira la fotografía. Busca palabras clave **en el texto de la pregunta** y decide el veredicto con `Math.random()`:
+`analyzeImage()` no miraba la fotografía: buscaba palabras clave **en el texto de la pregunta** y decidía el veredicto con `Math.random()`. Ese texto se guardaba en `evidences.ai_analysis` y se imprimía en el reporte oficial como `🤖 Análisis IA:` — bajo la firma de un validador humano. Dos envíos de la misma evidencia producían conclusiones opuestas.
 
-```js
-return `Se detectan elementos relacionados con: ${found.join(', ')}. La evidencia visual sugiere ${Math.random() > 0.5 ? 'cumplimiento parcial' : 'necesidad de mejora'}.`;
-```
+**Estado: eliminado.** La función ya no existe, la subida de fotos no genera ningún texto (`src/App.js:948`), el insert en `evidences` no escribe `ai_analysis` (`src/App.js:1020`) y el reporte titula la sección "Evidencias fotográficas", mostrando solo la pregunta asociada y la foto (`src/App.js:1227-1245`).
 
-Ese texto se guarda en `evidences.ai_analysis` (`src/App.js:1030`) y se imprime en el reporte oficial como `🤖 Análisis IA:` (`src/App.js:1254`). Dos envíos de la misma evidencia producen conclusiones opuestas. En un documento de certificación con membrete de IAET esto es un riesgo legal, no un detalle cosmético.
-
-**Qué se necesita:** o bien conectar la Edge Function que ya existe (limitación 3), o quitarle al texto la etiqueta de "IA" y presentarlo como lo que es.
+**Residuo:** la columna `evidences.ai_analysis` sigue existiendo y las filas guardadas antes del cambio conservan el texto aleatorio. El reporte **no la lee**, así que ese texto no puede volver a aparecer en un documento. Si más adelante se implementa análisis real (limitación 3), la columna se reutiliza; si no, conviene vaciarla o eliminarla en una migración.
 
 ### 2. Los registros hechos sin conexión se pierden para siempre
 
-`src/App.js:994-1002` detecta `navigator.onLine === false`, guarda el registro completo en `localStorage` bajo la clave `pendingRegistration` y le promete al usuario: *"Registro guardado localmente. Se enviará cuando haya conexión."*
+`src/App.js:985-993` detecta `navigator.onLine === false`, guarda el registro completo en `localStorage` bajo la clave `pendingRegistration` y le promete al usuario: *"Registro guardado localmente. Se enviará cuando haya conexión."*
 
 **Nada en el código lee esa clave.** No hay reintento, no hay cola, no hay indicador. El registro queda en el `localStorage` del dispositivo hasta que el usuario borre los datos del navegador, y la empresa cree que se envió.
+
+Ojo con no confundirlo: las fotos y respuestas sueltas sí se reenvían, vía la clave `offlineQueue` que sincroniza el efecto de `src/App.js:850-868` al dispararse el evento `online` del navegador. Lo que se pierde es **el envío final del registro** — la fila de `companies`, sus `answers` y sus `evidences`.
 
 **Qué se necesita:** un efecto que al reconectar lea `pendingRegistration`, lo envíe y lo borre, más un aviso visible de cuántos registros hay pendientes.
 
@@ -87,7 +85,9 @@ Ese texto se guarda en `evidences.ai_analysis` (`src/App.js:1030`) y se imprime 
 
 `supabase/functions/generate-analysis/index.ts` está escrita, declara `OPENAI_API_KEY` como secreto y falla si no existe. **No hay ninguna invocación a `functions.invoke` en `src/`.** Es código muerto desde el punto de vista de la app desplegada.
 
-**Qué se necesita:** decidir si se conecta (y entonces resolver la limitación 1 con análisis real) o si se borra del repositorio. Mientras no se conecte, configurar el secreto `OPENAI_API_KEY` en Supabase no sirve de nada.
+Un detalle que importa antes de conectarla: su contrato recibe `{ moduleScores, totalPct }` —los puntajes numéricos de la auditoría— y devuelve narrativa por módulo más tres recomendaciones generales. **No analiza fotografías**, así que nunca fue la solución a la limitación 1.
+
+**Qué se necesita:** decidir si se conecta (aportaría texto por módulo y recomendaciones al reporte, reemplazando las frases fijas que hoy se generan en el cliente) o si se borra del repositorio. Un análisis real de las fotos exigiría una función distinta, con un modelo de visión y la URL pública de la evidencia. Mientras no se conecte nada, configurar el secreto `OPENAI_API_KEY` en Supabase no sirve de nada.
 
 ### 4. La recuperación de contraseña está rota en dos frentes
 
@@ -102,7 +102,7 @@ Ese texto se guarda en `evidences.ai_analysis` (`src/App.js:1030`) y se imprime 
 
 Las 13 columnas de la tabla son: `id, name, rif, rtn, sector, address, phone, email, total_score, total_percentage, created_at, updated_at, user_id`. **No hay `latitude`, `longitude`, `city` ni `state`.**
 
-Todo lo geográfico se aplana en `address` al registrar (`src/App.js:1011`):
+Todo lo geográfico se aplana en `address` al registrar (`src/App.js:1002`):
 
 ```js
 address: `${companyData.address}, ${companyData.city}, ${companyData.state}`

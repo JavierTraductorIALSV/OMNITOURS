@@ -800,14 +800,6 @@ useEffect(() => {
     return '';
   };
 
-  const analyzeImage = (qId) => {
-    const questionText = getQuestionText(qId).toLowerCase();
-    const keywords = ['rampa', 'pasamanos', 'ancho', 'sanitario', 'mobiliario', 'braille', 'iluminación', 'alarma', 'acústica'];
-    const found = keywords.filter(k => questionText.includes(k));
-    if (found.length === 0) return "Análisis no concluyente. Se requiere inspección manual.";
-    return `Se detectan elementos relacionados con: ${found.join(', ')}. La evidencia visual sugiere ${Math.random() > 0.5 ? 'cumplimiento parcial' : 'necesidad de mejora'}.`;
-  };
-
   const saveProgressLocally = () => {
     const progress = {
       answers,
@@ -950,11 +942,10 @@ useEffect(() => {
     }
     const { data: publicUrlData } = supabase.storage.from('evidencias').getPublicUrl(fileName);
     const photoUrl = publicUrlData.publicUrl;
-    const analysis = analyzeImage(qId);
     setEvidences(prev => {
       const current = prev[qId] || [];
       const updated = [...current];
-      updated[photoIndex] = { url: photoUrl, analysis: analysis };
+      updated[photoIndex] = { url: photoUrl };
       return { ...prev, [qId]: updated };
     });
     setUploadMessage({ show: true, text: '✅ Archivo guardado', type: 'success' });
@@ -1026,8 +1017,7 @@ useEffect(() => {
         photos.filter(p => p && p.url).map(p => ({
           company_id: company.id,
           question_id: qId,
-          photo_urls: [p.url],
-          ai_analysis: [p.analysis]
+          photo_urls: [p.url]
         }))
       );
       if (evidencesToInsert.length) await supabase.from('evidences').insert(evidencesToInsert);
@@ -1235,23 +1225,23 @@ useEffect(() => {
       sections.push(new Paragraph({ text: '', spacing: { after: 400 } }));
 
       if (evidenciasData && evidenciasData.length > 0) {
-        sections.push(new Paragraph({ children: [new TextRun({ text: 'Evidencias fotográficas y análisis de IA', bold: true, size: 20 })], spacing: { after: 200 } }));
+        sections.push(new Paragraph({ children: [new TextRun({ text: 'Evidencias fotográficas', bold: true, size: 20 })], spacing: { after: 200 } }));
         for (const ev of evidenciasData) {
           const questionText = getQuestionText(ev.question_id);
           const photoUrl = ev.photo_urls?.[0] || '';
-          const analysis = ev.ai_analysis?.[0] || 'Sin análisis';
+          // ev.ai_analysis se ignora a propósito: la columna sigue existiendo y las
+          // filas guardadas antes de este cambio contienen texto generado al azar.
           sections.push(new Paragraph({ children: [new TextRun(`Pregunta asociada: ${questionText}`)], spacing: { after: 100 } }));
           if (photoUrl) {
             try {
               const imgBuffer = await fetchImageAsArrayBuffer(photoUrl);
               if (imgBuffer) {
-                sections.push(new Paragraph({ children: [new ImageRun({ data: imgBuffer, transformation: { width: 300 } })], alignment: AlignmentType.CENTER, spacing: { after: 100 } }));
+                sections.push(new Paragraph({ children: [new ImageRun({ data: imgBuffer, transformation: { width: 300 } })], alignment: AlignmentType.CENTER, spacing: { after: 400 } }));
               } else {
-                sections.push(new Paragraph({ children: [new TextRun('[No se pudo cargar la imagen]')], spacing: { after: 100 } }));
+                sections.push(new Paragraph({ children: [new TextRun('[No se pudo cargar la imagen]')], spacing: { after: 400 } }));
               }
-            } catch (err) { sections.push(new Paragraph({ children: [new TextRun('[No se pudo cargar la imagen]')], spacing: { after: 100 } })); }
+            } catch (err) { sections.push(new Paragraph({ children: [new TextRun('[No se pudo cargar la imagen]')], spacing: { after: 400 } })); }
           }
-          sections.push(new Paragraph({ children: [new TextRun(`🤖 Análisis IA: ${analysis}`)], spacing: { after: 400 } }));
         }
       } else {
         sections.push(new Paragraph({ children: [new TextRun('No se cargaron evidencias fotográficas durante el registro.')], spacing: { after: 200 } }));
