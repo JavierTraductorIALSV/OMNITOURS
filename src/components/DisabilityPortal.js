@@ -792,6 +792,11 @@ const DisabilityPortal = ({ onBack }) => {
               const stars = getStars(company.total_percentage);
               const nivelTexto = getNivelTexto(company.total_percentage);
               const sectorLabel = sectors.find(s => s.id === company.sector)?.label || company.sector;
+              // Nombre + dirección: la columna address es texto libre ("Avenida Aldonza
+              // Manrique ubicado en la Isla de Margarita…") y sola geocodifica mal.
+              const mapsQuery = company.address
+                ? `${company.name}, ${company.address}`
+                : '';
 
               return (
                 <div
@@ -805,7 +810,7 @@ const DisabilityPortal = ({ onBack }) => {
                           {company.name}
                         </h3>
                         <p className="text-xs text-slate-500 flex items-center gap-1 mt-1">
-                          <MapPin size={12} /> {company.address || 'Sin dirección'}
+                          <MapPin size={12} aria-hidden="true" /> {company.address || 'Sin dirección'}
                         </p>
                       </div>
                       <img
@@ -862,6 +867,20 @@ const DisabilityPortal = ({ onBack }) => {
                       <div className="bg-red-50 text-red-700 text-xs font-bold px-3 py-2 rounded-xl">
                         ⚠️ Aún no cumple con los estándares mínimos
                       </div>
+                    )}
+
+                    {mapsQuery && (
+                      <a
+                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapsQuery)}`}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        aria-label={`Ver ${company.name} en Google Maps (se abre en una pestaña nueva)`}
+                        className="mt-3 flex items-center justify-center gap-2 w-full bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 text-white text-xs font-black py-2.5 rounded-xl transition-colors"
+                      >
+                        <MapPin size={14} aria-hidden="true" />
+                        Ver en Google Maps
+                        <span aria-hidden="true">↗</span>
+                      </a>
                     )}
                   </div>
                 </div>
