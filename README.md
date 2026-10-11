@@ -28,7 +28,20 @@ npm run build      # build de producción en build/
 
 Despliegue web: el archivo `public/_redirects` (`/* /index.html 200`) hace que Netlify sirva la SPA en cualquier ruta. **Es necesario** porque la app no usa router: todas las pantallas se montan y desmontan con `setView()`, y las rutas profundas como `/reset-password` existen solo para que Supabase pueda redirigir de vuelta.
 
-Build de Android: `npx cap sync android` y abrir `android/` en Android Studio.
+### Build de Android y el APK que se descarga
+
+El botón **"📲 Descargar App"** sirve `/OmniTour.apk`, que es `public/OmniTour.apk`: **un binario commiteado**. Desplegar la web no lo actualiza. Cada cambio que deba llegar al teléfono exige recompilarlo a mano y volver a commitearlo. Ver [limitación 11](#11-el-apk-descargable-es-un-binario-commiteado-y-firma-debug).
+
+```bash
+npm run build
+npx cap sync android
+cd android && ./gradlew assembleDebug     # JAVA_HOME debe apuntar a un JDK
+cp app/build/outputs/apk/debug/app-debug.apk ../public/OmniTour.apk
+```
+
+`ignoreAssetsPattern` en `android/app/build.gradle` excluye `*.apk` del empaquetado. Sin esa exclusión el APK se incrusta a sí mismo en cada vuelta y el peso se duplica: el binario de junio de 2026 pesaba 22 MB llevando dentro una copia de 11 MB de la generación anterior.
+
+Subir `versionCode` y `versionName` en cada rebuild: sin eso el teléfono no distingue el APK nuevo del viejo.
 
 ### Variables de entorno
 
@@ -157,7 +170,18 @@ Los cambios de gestión de foco **no** son verificables con build: hacen falta p
 2. **Decidir sobre `OPENAI_API_KEY`** (limitación 3). Solo tiene sentido ejecutar `supabase secrets set OPENAI_API_KEY=...` si se conecta la Edge Function.
 3. **Verificar que todo esté commiteado.** `git status` antes de desplegar: si el deploy se dispara desde GitHub, cualquier funcionalidad sin commitear no se publica. Un deploy por arrastre de la carpeta `build/` enmascara el problema, porque el build local sí tiene los cambios.
 
+### 11. El APK descargable es un binario commiteado y firma debug
+
+`public/OmniTour.apk` no se genera en ningún pipeline: es un archivo que alguien tiene que recompilar y commitear a mano (procedimiento en [Puesta en marcha](#build-de-android-y-el-apk-que-se-descarga)). Entre el 2026-06-09 y el 2026-10-11 se desplegó la web muchas veces y el APK no se tocó ni una, así que quien lo instaló recibió una app cuatro meses anterior sin ninguna señal de que estuviera desactualizada.
+
+Además es un **build debug**, firmado con el `debug.keystore` local. Consecuencias: no se puede subir a Play Store, la firma depende de esa máquina, y si se pierde el keystore los usuarios instalados no podrán actualizar encima y tendrán que desinstalar.
+
+**Mitigado parcialmente:** `versionCode`/`versionName` ahora se suben en cada rebuild (estaban clavados en 1 / "1.0"), y `ignoreAssetsPattern` corta la auto-incrustación que duplicaba el peso en cada vuelta.
+
+**Qué falta:** un keystore de release commiteado fuera del repo (o guardado en un gestor de secretos) y `./gradlew assembleRelease`, o directamente sacar el APK del repo y servirlo desde un almacenamiento externo con un enlace versionado.
+
 ## Otras
 
 - **No hay tests.** El script `npm test` de CRA existe pero no hay ningún archivo de prueba en el repositorio.
 - **`src/Logo.css` y `src/LogoIAET.css` están huérfanos**: los importaba `src/main.jsx`, que se borró en `155437b`. Lo mismo ocurre con el `_redirects` de la raíz, duplicado del que sí se usa (`public/_redirects`).
+- **`public/ff.apk` son 11 MB muertos**: ningún código lo referencia. Es el APK de la generación anterior al que estaba publicado, o sea el que el binario de junio llevaba incrustado. Como está en `public/`, Netlify lo sirve igual en `/ff.apk`.
