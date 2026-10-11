@@ -1169,9 +1169,12 @@ useEffect(() => {
       const doc = new Document({
         sections: [{
           children: sections,
+          // headers va al nivel de la sección, no dentro de properties: anidada
+          // ahí docx la ignora en silencio, no emite word/header1.xml y los logos
+          // del membrete no se incrustan.
+          headers: { default: header },
           properties: {
-            page: { margin: { top: 2000, bottom: 2000, left: 2000, right: 2000 } },
-            headers: { default: header }
+            page: { margin: { top: 2000, bottom: 2000, left: 2000, right: 2000 } }
           }
         }]
       });
