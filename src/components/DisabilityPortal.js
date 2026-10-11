@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase, IS_PASSWORD_RECOVERY } from '../supabaseClient';
 import { MapPin, Star, CheckCircle, LogOut, ArrowRight, Award } from 'lucide-react';
+import { calcularPorcentajesPorDiscapacidad, coberturaAuditoria, FichasPorDiscapacidad } from '../catalogoAccesibilidad';
 
 const DisabilityPortal = ({ onBack }) => {
   const [user, setUser] = useState(null);
@@ -8,6 +9,7 @@ const DisabilityPortal = ({ onBack }) => {
   const [view, setView] = useState(IS_PASSWORD_RECOVERY ? 'reset' : 'loading');
   const [recommendations, setRecommendations] = useState([]);
   const [filteredRecommendations, setFilteredRecommendations] = useState([]);
+  const [respuestasPorEmpresa, setRespuestasPorEmpresa] = useState({});
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedState, setSelectedState] = useState('');
   const [selectedSector, setSelectedSector] = useState('');
@@ -164,6 +166,22 @@ const DisabilityPortal = ({ onBack }) => {
         .order('total_percentage', { ascending: false });
       if (error) throw error;
       setRecommendations(data || []);
+
+      // Las respuestas alimentan las fichas por discapacidad. Si esta consulta
+      // falla el listado tiene que seguir visible: las fichas salen con "—".
+      const { data: respuestas, error: errorRespuestas } = await supabase
+        .from('answers')
+        .select('company_id, question_id, score');
+      if (errorRespuestas) {
+        console.error('Error al cargar respuestas:', errorRespuestas);
+        return;
+      }
+      const agrupadas = {};
+      (respuestas || []).forEach(r => {
+        if (!agrupadas[r.company_id]) agrupadas[r.company_id] = {};
+        agrupadas[r.company_id][r.question_id] = r.score;
+      });
+      setRespuestasPorEmpresa(agrupadas);
     } catch (e) {
       console.error('Error al cargar empresas:', e);
     } finally {
@@ -797,6 +815,10 @@ const DisabilityPortal = ({ onBack }) => {
               const mapsQuery = company.address
                 ? `${company.name}, ${company.address}`
                 : '';
+              const gruposDiscapacidad = calcularPorcentajesPorDiscapacidad(
+                company.sector,
+                respuestasPorEmpresa[company.id]
+              );
 
               return (
                 <div
@@ -850,6 +872,17 @@ const DisabilityPortal = ({ onBack }) => {
                       <p className="text-xs font-bold text-slate-700 text-center">
                         {nivelTexto}
                       </p>
+                    </div>
+
+                    <div className="mb-3">
+                      <p className="text-xs font-bold text-slate-600 mb-1.5">
+                        Accesibilidad por tipo de discapacidad
+                      </p>
+                      <FichasPorDiscapacidad
+                        grupos={gruposDiscapacidad}
+                        empresa={company.name}
+                        cobertura={coberturaAuditoria(company.sector, respuestasPorEmpresa[company.id])}
+                      />
                     </div>
 
                     <div className="flex items-center gap-1 text-green-600 text-xs font-black mb-2">
