@@ -1082,7 +1082,8 @@ useEffect(() => {
 
       const moduleScores = puntajesPorModulo(company.sector, respuestasMap)
         .map(m => ({ ...m, description: getCategoryDescription(m.name, m.pct) }));
-      const nivel = nivelDeAccesibilidad(promedioDeModulos(moduleScores));
+      const totalPct = promedioDeModulos(moduleScores);
+      const nivel = nivelDeAccesibilidad(totalPct);
       const trofeoBuffer = await fetchImagenValidada(nivel.trofeo);
       const header = await membreteOmniIaet();
 
