@@ -1116,16 +1116,23 @@ useEffect(() => {
       else if (totalPct >= 50) { nivelTexto = 'NORMAL (Básico)'; trofeoImagen = '/Normal.png'; }
       else { nivelTexto = 'INACCESIBLE (Crítico)'; trofeoImagen = '/inaccesibilidad.png'; }
 
+      // Un estático inexistente vuelve como 200 con el index.html por el _redirects
+      // de la SPA, y docx incrusta esos bytes tal cual como parte .png: Word rechaza
+      // el certificado completo. Se valida la firma binaria antes de confiar en el cuerpo.
       const fetchImageAsArrayBuffer = async (url) => {
         try {
           const res = await fetch(url);
-          return await res.arrayBuffer();
+          const buf = await res.arrayBuffer();
+          const bytes = new Uint8Array(buf);
+          const esPng = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+          const esJpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
+          return esPng || esJpeg ? buf : null;
         } catch {
           return null;
         }
       };
 
-      const logoOmniBuffer = await fetchImageAsArrayBuffer('/Logo-Omnitours.png');
+      const logoOmniBuffer = await fetchImageAsArrayBuffer('/Logo-OmniTours.png');
       const logoIaetBuffer = await fetchImageAsArrayBuffer('/iaet-logo.png');
       const trofeoBuffer = await fetchImageAsArrayBuffer(trofeoImagen);
 
@@ -1325,7 +1332,7 @@ useEffect(() => {
       <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 p-4">
         <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full">
           <img
-            src="/Logo-Omnitours.png"
+            src="/Logo-OmniTours.png"
             alt="Omnitours"
             className="w-32 sm:w-40 md:w-48 lg:w-56 mx-auto mb-6 h-auto"
           />
@@ -1411,7 +1418,7 @@ useEffect(() => {
       <header className={`bg-white/90 backdrop-blur-md p-4 shadow-sm flex justify-between items-center sticky top-0 z-50 border-b ${contrastMode === 'high-contrast' ? 'bg-black border-white' : ''} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300' : ''}`}>
         <div className="flex items-center gap-3">
           <img
-            src="/Logo-Omnitours.png"
+            src="/Logo-OmniTours.png"
             alt="Omnitours"
             className="h-12 sm:h-14 md:h-16 lg:h-20 xl:h-24 w-auto"
           />
@@ -1507,7 +1514,7 @@ useEffect(() => {
               <h3 className={`text-sm font-black uppercase tracking-widest mb-4 ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Aliados y apoyo</h3>
               <div className="flex justify-center items-center gap-8 flex-wrap">
                 <img src="/iaet-logo.png" alt="IAET" className="h-12 w-auto opacity-70" />
-                <img src="/Logo-Omnitours.png" alt="Omnitours" className="h-12 w-auto opacity-70" />
+                <img src="/Logo-OmniTours.png" alt="Omnitours" className="h-12 w-auto opacity-70" />
                 <div className={`text-xs font-bold ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Instituto de Altos Estudios Transdisciplinarios</div>
               </div>
             </div>
