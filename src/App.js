@@ -72,6 +72,83 @@ const imagenEnReporte = (buffer, ancho) => {
   return new ImageRun({ data: buffer, transformation: { width: ancho, height: alto } });
 };
 
+// Un estático inexistente vuelve como 200 con el index.html por el _redirects de
+// la SPA, y docx incrusta esos bytes tal cual como parte .png: Word rechaza el
+// documento completo. Se valida la firma binaria antes de confiar en el cuerpo.
+const fetchImagenValidada = async (url) => {
+  try {
+    const res = await fetch(url);
+    const buf = await res.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    const esPng = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+    const esJpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
+    return esPng || esJpeg ? buf : null;
+  } catch {
+    return null;
+  }
+};
+
+const membreteOmniIaet = async () => {
+  const [omni, iaet] = await Promise.all([
+    fetchImagenValidada('/Logo-OmniTours.png'),
+    fetchImagenValidada('/iaet-logo.png')
+  ]);
+  return new Header({
+    children: [
+      new Paragraph({
+        children: [
+          omni ? imagenEnReporte(omni, 100) : new TextRun(''),
+          new TextRun('      '),
+          iaet ? imagenEnReporte(iaet, 50) : new TextRun('')
+        ],
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 100 }
+      })
+    ]
+  });
+};
+
+// headers va al nivel de la sección, no dentro de properties: anidada ahí docx la
+// ignora en silencio, no emite word/header1.xml y el membrete no se incrusta.
+const documentoConMembrete = (sections, header) => new Document({
+  sections: [{
+    children: sections,
+    headers: { default: header },
+    properties: {
+      page: { margin: { top: 2000, bottom: 2000, left: 2000, right: 2000 } }
+    }
+  }]
+});
+
+// El nivel se decide con el promedio de los porcentajes por módulo. Es el mismo
+// criterio para el informe y para el certificado: si cada documento usara el suyo
+// (total_percentage es puntos sobre el máximo, no promedio de módulos) podrían
+// contradecirse para la misma empresa.
+const puntajesPorModulo = (sector, respuestasMap) =>
+  getModulesBySector(sector).map(mod => {
+    let score = 0, max = 0;
+    mod.questions.forEach(q => {
+      score += respuestasMap[q.id] || 0;
+      max += q.max;
+    });
+    return { name: mod.title, pct: max === 0 ? 0 : Math.round((score / max) * 100) };
+  });
+
+const promedioDeModulos = (moduleScores) =>
+  moduleScores.length ? moduleScores.reduce((acc, m) => acc + m.pct, 0) / moduleScores.length : 0;
+
+// certificable marca hasta dónde se emite certificado: por decisión del usuario
+// solo los tres niveles superiores. Normal e Inaccesible no acreditan nada.
+const nivelDeAccesibilidad = (totalPct) => {
+  if (totalPct >= 85) return { texto: 'ORO (Excelente)', trofeo: '/Oro.png', certificable: true };
+  if (totalPct >= 75) return { texto: 'PLATA (Muy Bueno)', trofeo: '/plata.png', certificable: true };
+  if (totalPct >= 60) return { texto: 'BRONCE (Bueno)', trofeo: '/Bronce.png', certificable: true };
+  if (totalPct >= 50) return { texto: 'NORMAL (Básico)', trofeo: '/Normal.png', certificable: false };
+  return { texto: 'INACCESIBLE (Crítico)', trofeo: '/inaccesibilidad.png', certificable: false };
+};
+
+const fechaLarga = (d) => d.toLocaleDateString('es-VE', { day: 'numeric', month: 'long', year: 'numeric' });
+
 // ============================================
 // COMPONENTE PRINCIPAL
 // ============================================
@@ -1003,60 +1080,11 @@ useEffect(() => {
 
       const { data: evidenciasData } = await supabase.from('evidences').select('*').eq('company_id', company.id);
 
-      const sectorModules = getModulesBySector(company.sector);
-
-      const moduleScores = sectorModules.map(mod => {
-        let score = 0, max = 0;
-        mod.questions.forEach(q => {
-          score += respuestasMap[q.id] || 0;
-          max += q.max;
-        });
-        const pct = max === 0 ? 0 : Math.round((score / max) * 100);
-        return { name: mod.title, pct, description: getCategoryDescription(mod.title, pct) };
-      });
-
-      const totalPct = moduleScores.reduce((acc, m) => acc + m.pct, 0) / moduleScores.length;
-
-      let nivelTexto = '', trofeoImagen = '';
-      if (totalPct >= 85) { nivelTexto = 'ORO (Excelente)'; trofeoImagen = '/Oro.png'; }
-      else if (totalPct >= 75) { nivelTexto = 'PLATA (Muy Bueno)'; trofeoImagen = '/plata.png'; }
-      else if (totalPct >= 60) { nivelTexto = 'BRONCE (Bueno)'; trofeoImagen = '/Bronce.png'; }
-      else if (totalPct >= 50) { nivelTexto = 'NORMAL (Básico)'; trofeoImagen = '/Normal.png'; }
-      else { nivelTexto = 'INACCESIBLE (Crítico)'; trofeoImagen = '/inaccesibilidad.png'; }
-
-      // Un estático inexistente vuelve como 200 con el index.html por el _redirects
-      // de la SPA, y docx incrusta esos bytes tal cual como parte .png: Word rechaza
-      // el certificado completo. Se valida la firma binaria antes de confiar en el cuerpo.
-      const fetchImageAsArrayBuffer = async (url) => {
-        try {
-          const res = await fetch(url);
-          const buf = await res.arrayBuffer();
-          const bytes = new Uint8Array(buf);
-          const esPng = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
-          const esJpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
-          return esPng || esJpeg ? buf : null;
-        } catch {
-          return null;
-        }
-      };
-
-      const logoOmniBuffer = await fetchImageAsArrayBuffer('/Logo-OmniTours.png');
-      const logoIaetBuffer = await fetchImageAsArrayBuffer('/iaet-logo.png');
-      const trofeoBuffer = await fetchImageAsArrayBuffer(trofeoImagen);
-
-      const header = new Header({
-        children: [
-          new Paragraph({
-            children: [
-              logoOmniBuffer ? imagenEnReporte(logoOmniBuffer, 100) : new TextRun(''),
-              new TextRun('      '),
-              logoIaetBuffer ? imagenEnReporte(logoIaetBuffer, 50) : new TextRun('')
-            ],
-            alignment: AlignmentType.CENTER,
-            spacing: { after: 100 }
-          })
-        ]
-      });
+      const moduleScores = puntajesPorModulo(company.sector, respuestasMap)
+        .map(m => ({ ...m, description: getCategoryDescription(m.name, m.pct) }));
+      const nivel = nivelDeAccesibilidad(promedioDeModulos(moduleScores));
+      const trofeoBuffer = await fetchImagenValidada(nivel.trofeo);
+      const header = await membreteOmniIaet();
 
       const sections = [];
 
@@ -1069,7 +1097,7 @@ useEffect(() => {
 
       sections.push(
         new Paragraph({ children: [new TextRun({ text: 'La empresa turística se encuentra en el nivel de', bold: true, size: 22 })], alignment: AlignmentType.CENTER }),
-        new Paragraph({ children: [new TextRun({ text: nivelTexto, bold: true, color: "4F46E5", size: 28 })], alignment: AlignmentType.CENTER }),
+        new Paragraph({ children: [new TextRun({ text: nivel.texto, bold: true, color: "4F46E5", size: 28 })], alignment: AlignmentType.CENTER }),
         trofeoBuffer ? new Paragraph({ children: [imagenEnReporte(trofeoBuffer, 120)], alignment: AlignmentType.CENTER, spacing: { after: 300 } }) : new Paragraph({ text: '', spacing: { after: 300 } })
       );
 
@@ -1149,7 +1177,7 @@ useEffect(() => {
           sections.push(new Paragraph({ children: [new TextRun(`Pregunta asociada: ${questionText}`)], spacing: { after: 100 } }));
           if (photoUrl) {
             try {
-              const imgBuffer = await fetchImageAsArrayBuffer(photoUrl);
+              const imgBuffer = await fetchImagenValidada(photoUrl);
               if (imgBuffer) {
                 sections.push(new Paragraph({ children: [imagenEnReporte(imgBuffer, 300)], alignment: AlignmentType.CENTER, spacing: { after: 400 } }));
               } else {
@@ -1166,18 +1194,7 @@ useEffect(() => {
       sections.push(new Paragraph({ children: [new TextRun({ text: 'Dr. Juan E. Luján A.', bold: true })], alignment: AlignmentType.CENTER }));
       sections.push(new Paragraph({ children: [new TextRun('Validador de Accesibilidad Turística')], alignment: AlignmentType.CENTER }));
 
-      const doc = new Document({
-        sections: [{
-          children: sections,
-          // headers va al nivel de la sección, no dentro de properties: anidada
-          // ahí docx la ignora en silencio, no emite word/header1.xml y los logos
-          // del membrete no se incrustan.
-          headers: { default: header },
-          properties: {
-            page: { margin: { top: 2000, bottom: 2000, left: 2000, right: 2000 } }
-          }
-        }]
-      });
+      const doc = documentoConMembrete(sections, header);
 
       const blob = await Packer.toBlob(doc);
       if (returnBlob) {
@@ -1188,6 +1205,66 @@ useEffect(() => {
     } catch (error) {
       console.error('Error generando reporte Word:', error);
       alert('Error al generar el reporte: ' + error.message);
+    }
+  };
+
+  // Documento aparte del informe: acredita el nivel obtenido y nada más. Solo se
+  // emite desde Bronce hacia arriba; a una empresa Normal o Inaccesible se le
+  // explica por qué no hay certificado en vez de darle un documento que no la
+  // acredita.
+  const generarCertificadoWord = async (company) => {
+    try {
+      const { data: respuestas } = await supabase.from('answers').select('*').eq('company_id', company.id);
+      if (!respuestas || respuestas.length === 0) {
+        alert('⚠️ Esta empresa no ha completado el registro.');
+        return;
+      }
+      const respuestasMap = {};
+      respuestas.forEach(r => respuestasMap[r.question_id] = r.score);
+
+      const totalPct = promedioDeModulos(puntajesPorModulo(company.sector, respuestasMap));
+      const nivel = nivelDeAccesibilidad(totalPct);
+
+      if (!nivel.certificable) {
+        alert(`⚠️ ${company.name} está en nivel ${nivel.texto} con ${Math.round(totalPct)}%.\n\nEl certificado se emite desde el nivel BRONCE (60%) en adelante.`);
+        return;
+      }
+
+      const emision = new Date();
+      const vencimiento = new Date(emision);
+      vencimiento.setFullYear(vencimiento.getFullYear() + 1);
+
+      const [trofeoBuffer, header] = await Promise.all([fetchImagenValidada(nivel.trofeo), membreteOmniIaet()]);
+
+      const centrado = (texto, opts = {}, spacing) => new Paragraph({
+        children: [new TextRun({ text: texto, ...opts })],
+        alignment: AlignmentType.CENTER,
+        ...(spacing ? { spacing } : {})
+      });
+
+      const sections = [
+        centrado('CERTIFICADO DE ACCESIBILIDAD TURÍSTICA', { bold: true, size: 32, color: '4F46E5' }, { after: 120 }),
+        centrado('Omnitours e IAET certifican que', { size: 22 }, { after: 400 }),
+        centrado(company.name.toUpperCase(), { bold: true, size: 36 }, { after: 120 }),
+        centrado(`RIF: ${company.rif} | Sector: ${company.sector}`, { size: 20 }, { after: 400 }),
+        centrado('ha superado la auditoría de accesibilidad turística y ha obtenido el nivel', { size: 22 }, { after: 160 }),
+        centrado(nivel.texto, { bold: true, size: 30, color: '4F46E5' }, { after: 60 }),
+        centrado(`con un cumplimiento del ${Math.round(totalPct)}%`, { size: 22 }, { after: 240 }),
+        trofeoBuffer
+          ? new Paragraph({ children: [imagenEnReporte(trofeoBuffer, 150)], alignment: AlignmentType.CENTER, spacing: { after: 320 } })
+          : new Paragraph({ text: '', spacing: { after: 320 } }),
+        centrado(`Emitido el ${fechaLarga(emision)}`, { size: 20 }),
+        centrado(`Válido hasta el ${fechaLarga(vencimiento)}`, { size: 20 }, { after: 120 }),
+        centrado('La vigencia está sujeta a que las condiciones auditadas se mantengan.', { italics: true, size: 18, color: '64748B' }, { after: 480 }),
+        centrado('Dr. Juan E. Luján A.', { bold: true }),
+        centrado('Validador de Accesibilidad Turística')
+      ];
+
+      const blob = await Packer.toBlob(documentoConMembrete(sections, header));
+      saveAs(blob, `certificado_${company.rif}.docx`);
+    } catch (error) {
+      console.error('Error generando certificado Word:', error);
+      alert('Error al generar el certificado: ' + error.message);
     }
   };
 
@@ -1708,7 +1785,10 @@ useEffect(() => {
                   {searchResult.found ? (
                     <div className="flex justify-between items-center flex-wrap gap-2">
                       <div><p className={`font-bold ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{searchResult.empresa.name}</p><p className={`text-xs ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>RIF: {searchResult.empresa.rif} | Score: {searchResult.empresa.total_percentage}%</p></div>
-                      <button onClick={() => generateCompanyReportWord(searchResult.empresa)} className="bg-green-600 text-white px-4 py-2 rounded-xl text-sm font-black active:bg-teal-500">📄 Reporte Word</button>
+                      <div className="flex gap-2">
+                        <button onClick={() => generateCompanyReportWord(searchResult.empresa)} className="bg-green-600 text-white px-4 py-2 rounded-xl text-sm font-black active:bg-teal-500">📄 Reporte Word</button>
+                        <button onClick={() => generarCertificadoWord(searchResult.empresa)} className="bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-black active:bg-teal-500">🏅 Certificado</button>
+                      </div>
                     </div>
                   ) : (
                     <p className="text-red-500 font-bold">❌ No encontrada</p>
@@ -1760,7 +1840,12 @@ useEffect(() => {
                           />
                         </td>
                         <td className={`px-4 py-3 text-xs ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{emp.user_id || 'Desconocido'}</td>
-                        <td className="px-4 py-3"><button onClick={() => generateCompanyReportWord(emp)} aria-label={`Descargar reporte de ${emp.name}`} className="bg-indigo-600 text-white px-3 py-1 rounded-lg text-xs font-black"><span aria-hidden="true">📄</span></button></td>
+                        <td className="px-4 py-3">
+                          <div className="flex gap-1.5">
+                            <button onClick={() => generateCompanyReportWord(emp)} aria-label={`Descargar reporte de ${emp.name}`} title="Informe de accesibilidad" className="bg-indigo-600 text-white px-3 py-1 rounded-lg text-xs font-black"><span aria-hidden="true">📄</span></button>
+                            <button onClick={() => generarCertificadoWord(emp)} aria-label={`Descargar certificado de ${emp.name}`} title="Certificado por nivel obtenido (solo Oro, Plata y Bronce)" className="bg-amber-600 text-white px-3 py-1 rounded-lg text-xs font-black"><span aria-hidden="true">🏅</span></button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
