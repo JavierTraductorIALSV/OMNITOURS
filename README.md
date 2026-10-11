@@ -184,4 +184,3 @@ Además es un **build debug**, firmado con el `debug.keystore` local. Consecuenc
 
 - **No hay tests.** El script `npm test` de CRA existe pero no hay ningún archivo de prueba en el repositorio.
 - **`src/Logo.css` y `src/LogoIAET.css` están huérfanos**: los importaba `src/main.jsx`, que se borró en `155437b`. Lo mismo ocurre con el `_redirects` de la raíz, duplicado del que sí se usa (`public/_redirects`).
-- **`public/ff.apk` son 11 MB muertos**: ningún código lo referencia. Es el APK de la generación anterior al que estaba publicado, o sea el que el binario de junio llevaba incrustado. Como está en `public/`, Netlify lo sirve igual en `/ff.apk`.
