@@ -12,7 +12,7 @@ import { supabase, IS_PASSWORD_RECOVERY } from './supabaseClient';
 import DisabilityPortal from './components/DisabilityPortal';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
-import { Document, Packer, Paragraph, TextRun, ImageRun, AlignmentType, Header } from 'docx';
+import { Document, Packer, Paragraph, TextRun, ImageRun, AlignmentType, Header, Table, TableRow, TableCell, WidthType, VerticalAlign } from 'docx';
 
 import { getModulesBySector, calcularPorcentajesPorDiscapacidad, coberturaAuditoria, FichasPorDiscapacidad } from './catalogoAccesibilidad';
 
@@ -1141,6 +1141,63 @@ useEffect(() => {
         new Paragraph({ children: [new TextRun({ text: `${totalPct}%`, bold: true, size: 24 })], alignment: AlignmentType.CENTER, spacing: { after: 100 } }),
         new Paragraph({ children: [new TextRun(totalPct >= 85 ? 'Excelente nivel global.' : totalPct >= 70 ? 'Buen nivel, atender áreas identificadas.' : totalPct >= 50 ? 'Nivel básico, plan de mejora urgente.' : 'Nivel crítico, intervención inmediata.')], alignment: AlignmentType.CENTER, spacing: { after: 400 } })
       );
+
+      // Mismo desglose que ven el admin y el portal: sale de las respuestas ya
+      // cargadas, así el informe no puede decir otra cosa que la pantalla.
+      const gruposDiscapacidad = calcularPorcentajesPorDiscapacidad(company.sector, respuestasMap);
+      const cobertura = coberturaAuditoria(company.sector, respuestasMap);
+      const logosDiscapacidad = await Promise.all(
+        gruposDiscapacidad.map(g => (g.logo ? fetchImagenValidada(g.logo) : Promise.resolve(null)))
+      );
+
+      const celda = (children, ancho) => new TableCell({
+        children,
+        width: { size: ancho, type: WidthType.PERCENTAGE },
+        verticalAlign: VerticalAlign.CENTER
+      });
+      const textoCelda = (texto, opts = {}) => new Paragraph({
+        children: [new TextRun({ text: texto, size: 18, ...opts })],
+        alignment: AlignmentType.CENTER
+      });
+
+      sections.push(
+        new Paragraph({ children: [new TextRun({ text: 'Accesibilidad por tipo de discapacidad', bold: true, size: 22 })], spacing: { before: 200, after: 100 } }),
+        new Paragraph({ children: [new TextRun({ text: 'Una misma pregunta puede contar en más de un tipo, por eso estos porcentajes no suman 100% entre sí.', italics: true, size: 16, color: '64748B' })], spacing: { after: 200 } }),
+        new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          rows: [
+            new TableRow({
+              tableHeader: true,
+              children: [
+                celda([textoCelda('Tipo de discapacidad', { bold: true })], 46),
+                celda([textoCelda('Porcentaje', { bold: true })], 22),
+                celda([textoCelda('Preguntas evaluadas', { bold: true })], 32)
+              ]
+            }),
+            ...gruposDiscapacidad.map((g, i) => new TableRow({
+              children: [
+                celda([new Paragraph({
+                  children: [
+                    ...(logosDiscapacidad[i] ? [imagenEnReporte(logosDiscapacidad[i], 20), new TextRun('  ')] : []),
+                    new TextRun({ text: g.label, bold: true, size: 18 })
+                  ]
+                })], 46),
+                celda([textoCelda(g.pct === null ? '—' : `${g.pct}%`, { bold: true })], 22),
+                celda([textoCelda(g.n === 0 ? 'no aplica en este sector' : `${g.respondidas} de ${g.n}`)], 32)
+              ]
+            }))
+          ]
+        })
+      );
+
+      if (cobertura.respondidas > 0 && cobertura.respondidas < cobertura.total) {
+        sections.push(new Paragraph({
+          children: [new TextRun({ text: `Evaluadas ${cobertura.respondidas} de ${cobertura.total} preguntas del sector: los porcentajes cubren solo lo auditado.`, italics: true, size: 18, color: 'B45309' })],
+          spacing: { before: 100, after: 300 }
+        }));
+      } else {
+        sections.push(new Paragraph({ text: '', spacing: { after: 300 } }));
+      }
 
       sections.push(new Paragraph({ children: [new TextRun({ text: 'Recomendaciones generales', bold: true, size: 20 })], spacing: { after: 200 } }));
       const recs = [];
