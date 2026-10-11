@@ -38,6 +38,40 @@ const dataURLToArrayBuffer = (dataURL) => {
   return array.buffer;
 };
 
+// docx 7 necesita width Y height en transformation. Si falta el height escribe
+// cy="NaN" en word/document.xml y Word rechaza el certificado completo con
+// "existe un problema con el contenido". Se lee la dimensión real del archivo
+// para escalar sin deformar la imagen.
+const leerDimensionesImagen = (buffer) => {
+  const u = new Uint8Array(buffer);
+  if (u.length < 24) return null;
+  if (u[0] === 0x89 && u[1] === 0x50 && u[2] === 0x4e && u[3] === 0x47) {
+    const dv = new DataView(u.buffer, u.byteOffset, u.byteLength);
+    return { width: dv.getUint32(16), height: dv.getUint32(20) };
+  }
+  if (u[0] === 0xff && u[1] === 0xd8) {
+    let i = 2;
+    while (i + 9 < u.length) {
+      if (u[i] !== 0xff) { i += 1; continue; }
+      const marker = u[i + 1];
+      if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd8)) { i += 2; continue; }
+      const largo = (u[i + 2] << 8) | u[i + 3];
+      const esSof = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+      if (esSof) return { height: (u[i + 5] << 8) | u[i + 6], width: (u[i + 7] << 8) | u[i + 8] };
+      i += 2 + largo;
+    }
+  }
+  return null;
+};
+
+// Si no se pueden leer las dimensiones se usa un cuadrado: una imagen algo
+// deformada sigue siendo un certificado que abre, y un NaN no.
+const imagenEnReporte = (buffer, ancho) => {
+  const d = leerDimensionesImagen(buffer);
+  const alto = d && d.width > 0 && d.height > 0 ? Math.max(1, Math.round((ancho * d.height) / d.width)) : ancho;
+  return new ImageRun({ data: buffer, transformation: { width: ancho, height: alto } });
+};
+
 // ============================================
 // COMPONENTE PRINCIPAL
 // ============================================
@@ -1014,9 +1048,9 @@ useEffect(() => {
         children: [
           new Paragraph({
             children: [
-              logoOmniBuffer ? new ImageRun({ data: logoOmniBuffer, transformation: { width: 100 } }) : new TextRun(''),
+              logoOmniBuffer ? imagenEnReporte(logoOmniBuffer, 100) : new TextRun(''),
               new TextRun('      '),
-              logoIaetBuffer ? new ImageRun({ data: logoIaetBuffer, transformation: { width: 50 } }) : new TextRun('')
+              logoIaetBuffer ? imagenEnReporte(logoIaetBuffer, 50) : new TextRun('')
             ],
             alignment: AlignmentType.CENTER,
             spacing: { after: 100 }
@@ -1036,7 +1070,7 @@ useEffect(() => {
       sections.push(
         new Paragraph({ children: [new TextRun({ text: 'La empresa turística se encuentra en el nivel de', bold: true, size: 22 })], alignment: AlignmentType.CENTER }),
         new Paragraph({ children: [new TextRun({ text: nivelTexto, bold: true, color: "4F46E5", size: 28 })], alignment: AlignmentType.CENTER }),
-        trofeoBuffer ? new Paragraph({ children: [new ImageRun({ data: trofeoBuffer, transformation: { width: 120 } })], alignment: AlignmentType.CENTER, spacing: { after: 300 } }) : new Paragraph({ text: '', spacing: { after: 300 } })
+        trofeoBuffer ? new Paragraph({ children: [imagenEnReporte(trofeoBuffer, 120)], alignment: AlignmentType.CENTER, spacing: { after: 300 } }) : new Paragraph({ text: '', spacing: { after: 300 } })
       );
 
       sections.push(new Paragraph({ children: [new TextRun({ text: 'Resultados por categoría', bold: true, size: 22 })], spacing: { after: 200 } }));
@@ -1055,7 +1089,7 @@ useEffect(() => {
         ctx.font = 'bold 18px Arial'; ctx.fillStyle = '#1e293b'; ctx.fillText(`${m.pct}%`, 100, 115);
         const imgBuffer = await dataURLToArrayBuffer(canvas.toDataURL());
         sections.push(
-          new Paragraph({ children: [new ImageRun({ data: imgBuffer, transformation: { width: 150 } })], alignment: AlignmentType.CENTER, spacing: { after: 50 } }),
+          new Paragraph({ children: [imagenEnReporte(imgBuffer, 150)], alignment: AlignmentType.CENTER, spacing: { after: 50 } }),
           new Paragraph({ children: [new TextRun({ text: `${m.name}: ${m.pct}%`, bold: true, size: 18 })], alignment: AlignmentType.CENTER, spacing: { after: 100 } }),
           new Paragraph({ children: [new TextRun(m.description)], spacing: { after: 200 } })
         );
@@ -1074,7 +1108,7 @@ useEffect(() => {
 
       sections.push(
         new Paragraph({ children: [new TextRun({ text: 'Resultado General de Accesibilidad', bold: true, size: 22 })], spacing: { after: 200 } }),
-        new Paragraph({ children: [new ImageRun({ data: generalImgBuffer, transformation: { width: 150 } })], alignment: AlignmentType.CENTER, spacing: { after: 50 } }),
+        new Paragraph({ children: [imagenEnReporte(generalImgBuffer, 150)], alignment: AlignmentType.CENTER, spacing: { after: 50 } }),
         new Paragraph({ children: [new TextRun({ text: `${totalPct}%`, bold: true, size: 24 })], alignment: AlignmentType.CENTER, spacing: { after: 100 } }),
         new Paragraph({ children: [new TextRun(totalPct >= 85 ? 'Excelente nivel global.' : totalPct >= 70 ? 'Buen nivel, atender áreas identificadas.' : totalPct >= 50 ? 'Nivel básico, plan de mejora urgente.' : 'Nivel crítico, intervención inmediata.')], alignment: AlignmentType.CENTER, spacing: { after: 400 } })
       );
@@ -1117,7 +1151,7 @@ useEffect(() => {
             try {
               const imgBuffer = await fetchImageAsArrayBuffer(photoUrl);
               if (imgBuffer) {
-                sections.push(new Paragraph({ children: [new ImageRun({ data: imgBuffer, transformation: { width: 300 } })], alignment: AlignmentType.CENTER, spacing: { after: 400 } }));
+                sections.push(new Paragraph({ children: [imagenEnReporte(imgBuffer, 300)], alignment: AlignmentType.CENTER, spacing: { after: 400 } }));
               } else {
                 sections.push(new Paragraph({ children: [new TextRun('[No se pudo cargar la imagen]')], spacing: { after: 400 } }));
               }
