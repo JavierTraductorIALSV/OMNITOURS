@@ -562,10 +562,11 @@ const App = () => {
       }
       if (e.key !== 'Tab' || !nodo) return;
       // aria-modal anuncia que el fondo está inerte, pero sin trampa el Tab sigue
-      // recorriendo la tabla que quedó detrás del overlay.
+      // recorriendo la tabla que quedó detrás del overlay. Dentro del modal no hay
+      // controles ocultos: los deshabilitados ya quedan fuera del selector.
       const focales = Array.from(nodo.querySelectorAll(
         'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-      )).filter(el => el.offsetParent !== null || el === document.activeElement);
+      ));
       if (!focales.length) return;
       const primero = focales[0];
       const ultimo = focales[focales.length - 1];
