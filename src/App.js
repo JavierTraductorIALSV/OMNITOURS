@@ -149,6 +149,20 @@ const nivelDeAccesibilidad = (totalPct) => {
 
 const fechaLarga = (d) => d.toLocaleDateString('es-VE', { day: 'numeric', month: 'long', year: 'numeric' });
 
+// total_score y total_percentage son puntos obtenidos sobre el máximo del sector,
+// igual que getTotalStats(). No es el promedio de módulos que usan el informe y el
+// certificado: si al editar se recalcula con otro criterio, la tabla del admin y el
+// portal pasarían a mostrar un nivel distinto del que venían mostrando.
+const totalesDelCatalogo = (sector, respuestas) => {
+  let score = 0, max = 0;
+  getModulesBySector(sector).forEach(m => m.questions.forEach(q => {
+    const v = respuestas ? respuestas[q.id] : undefined;
+    if (typeof v === 'number') score += v;
+    max += q.max;
+  }));
+  return { score, max, pct: max === 0 ? 0 : Math.round((score / max) * 100) };
+};
+
 // ============================================
 // COMPONENTE PRINCIPAL
 // ============================================
@@ -223,6 +237,18 @@ const App = () => {
   const [searchRif, setSearchRif] = useState('');
   const [searchResult, setSearchResult] = useState(null);
   const [loadingSearch, setLoadingSearch] = useState(false);
+  // ========== EDICIÓN Y BORRADO DE EMPRESAS (solo admin) ==========
+  const [empresaEnEdicion, setEmpresaEnEdicion] = useState(null);
+  const [edicionDatos, setEdicionDatos] = useState({});
+  const [edicionRespuestas, setEdicionRespuestas] = useState({});
+  const [respuestasOriginales, setRespuestasOriginales] = useState({});
+  const [cargandoEdicion, setCargandoEdicion] = useState(false);
+  const [guardandoEdicion, setGuardandoEdicion] = useState(false);
+  const [empresaABorrar, setEmpresaABorrar] = useState(null);
+  const [rifConfirmacion, setRifConfirmacion] = useState('');
+  const [borrando, setBorrando] = useState(false);
+  const modalRef = useRef(null);
+  const botonDisparadorRef = useRef(null);
   const [registrationErrors, setRegistrationErrors] = useState({});
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
@@ -310,6 +336,42 @@ const App = () => {
     node.focus({ preventScroll: true });
     node.scrollTo({ top: 0 });
   }, [view, showDisabilityPortal]);
+
+  // Un modal tiene que recibir el foco al abrirse y cerrarse con Esc: si no, el
+  // foco se queda en el botón de la tabla, detrás del overlay (WCAG 2.4.3).
+  const modalAbierto = Boolean(empresaEnEdicion || empresaABorrar);
+  useEffect(() => {
+    if (!modalAbierto) return;
+    const nodo = modalRef.current;
+    if (nodo) nodo.focus({ preventScroll: true });
+    const alPresionar = (e) => {
+      if (e.key === 'Escape') {
+        if (empresaABorrar) cerrarBorradoEmpresa();
+        else if (empresaEnEdicion && !guardandoEdicion) cerrarEdicionEmpresa();
+        return;
+      }
+      if (e.key !== 'Tab' || !nodo) return;
+      // aria-modal anuncia que el fondo está inerte, pero sin trampa el Tab sigue
+      // recorriendo la tabla que quedó detrás del overlay.
+      const focales = Array.from(nodo.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )).filter(el => el.offsetParent !== null || el === document.activeElement);
+      if (!focales.length) return;
+      const primero = focales[0];
+      const ultimo = focales[focales.length - 1];
+      const activo = document.activeElement;
+      const afuera = !nodo.contains(activo);
+      if (e.shiftKey && (afuera || activo === primero)) {
+        e.preventDefault();
+        ultimo.focus();
+      } else if (!e.shiftKey && (afuera || activo === ultimo)) {
+        e.preventDefault();
+        primero.focus();
+      }
+    };
+    document.addEventListener('keydown', alPresionar);
+    return () => document.removeEventListener('keydown', alPresionar);
+  }, [modalAbierto, empresaABorrar, empresaEnEdicion, guardandoEdicion]);
 
   // ============================================================
   // ✅ AUTENTICACIÓN (EMPRESAS/ADMIN vs DISCAPACIDAD)
@@ -570,6 +632,193 @@ useEffect(() => {
       alert('Error al eliminar usuario: ' + error.message);
     }
   };
+
+  // Al cerrar un modal el foco vuelve al botón que lo abrió. Si la fila se borró
+  // ese botón ya no está en el documento y no hay nada a lo que volver.
+  const devolverFocoAlDisparador = () => {
+    const boton = botonDisparadorRef.current;
+    botonDisparadorRef.current = null;
+    if (boton && document.contains(boton)) boton.focus();
+  };
+
+  // Las respuestas se piden frescas al abrir el modal en vez de reutilizar
+  // respuestasPorEmpresa: si esa consulta hubiera fallado el mapa vendría vacío,
+  // todo parecería sin responder y al guardar se insertarían filas duplicadas
+  // para preguntas que sí tienen respuesta guardada.
+  const abrirEdicionEmpresa = async (empresa, boton) => {
+    if (userRole !== 'admin') return;
+    // Los dos modales comparten modalRef y botonDisparadorRef: si se abrieran a la
+    // vez, al cerrar uno el foco volvería al disparador del otro y Esc cerraría
+    // cualquiera de los dos.
+    if (modalAbierto) return;
+    botonDisparadorRef.current = boton || null;
+    // companies.address guarda "dirección, municipio, estado" en una sola columna
+    // (así lo compone el insert del registro). Se parte de derecha a izquierda:
+    // municipio y estado vienen de listas cerradas sin comas, así que los dos
+    // últimos tramos son siempre esos aunque la dirección libre traiga comas.
+    const tramos = (empresa.address || '').split(',');
+    const bienFormada = tramos.length >= 3;
+    setEdicionDatos({
+      name: empresa.name || '',
+      rif: empresa.rif || '',
+      rtn: empresa.rtn || '',
+      address: bienFormada ? tramos.slice(0, -2).join(',').trim() : (empresa.address || ''),
+      city: bienFormada ? tramos[tramos.length - 2].trim() : '',
+      state: bienFormada ? tramos[tramos.length - 1].trim() : '',
+      phone: empresa.phone || '',
+      email: empresa.email || ''
+    });
+    setEmpresaEnEdicion(empresa);
+    setCargandoEdicion(true);
+    setEdicionRespuestas({});
+    setRespuestasOriginales({});
+    try {
+      const { data, error } = await supabase.from('answers')
+        .select('question_id, score').eq('company_id', empresa.id);
+      if (error) throw error;
+      const mapa = {};
+      (data || []).forEach(r => { mapa[r.question_id] = r.score; });
+      setRespuestasOriginales(mapa);
+      setEdicionRespuestas({ ...mapa });
+    } catch (error) {
+      alert('No se pudieron cargar las respuestas guardadas: ' + error.message + '\n\nCierre el modal sin guardar para no pisar la auditoría.');
+      setCargandoEdicion(false);
+      return;
+    }
+    setCargandoEdicion(false);
+  };
+
+  const cerrarEdicionEmpresa = () => {
+    setEmpresaEnEdicion(null);
+    setEdicionDatos({});
+    setEdicionRespuestas({});
+    setRespuestasOriginales({});
+    devolverFocoAlDisparador();
+  };
+
+  const guardarEdicionEmpresa = async () => {
+    if (!empresaEnEdicion || guardandoEdicion) return;
+    if (!edicionDatos.name || !edicionDatos.name.trim()) {
+      alert('El nombre de la empresa no puede quedar vacío.');
+      return;
+    }
+    if (!edicionDatos.rif || !edicionDatos.rif.trim()) {
+      alert('El RIF no puede quedar vacío.');
+      return;
+    }
+    setGuardandoEdicion(true);
+    const id = empresaEnEdicion.id;
+    try {
+      // Se comparan las claves de ambos mapas para que también cuenten las
+      // respuestas que se dejaron en "Sin responder": esas no aparecen en
+      // edicionRespuestas y hay que borrarlas de la base.
+      const tocadas = Object.keys({ ...respuestasOriginales, ...edicionRespuestas })
+        .filter(qId => edicionRespuestas[qId] !== respuestasOriginales[qId]);
+      const aInsertar = tocadas
+        .filter(qId => typeof edicionRespuestas[qId] === 'number')
+        .map(qId => ({ company_id: id, question_id: qId, score: edicionRespuestas[qId] }));
+
+      // Se borran solo las preguntas que cambiaron y se reinsertan. Se evita el
+      // upsert porque exigiría una restricción única (company_id, question_id)
+      // que no consta en ningún lado del repo.
+      if (tocadas.length) {
+        const { error: eBorrado } = await supabase.from('answers')
+          .delete().eq('company_id', id).in('question_id', tocadas);
+        if (eBorrado) throw eBorrado;
+        if (aInsertar.length) {
+          const { error: eInsert } = await supabase.from('answers').insert(aInsertar);
+          if (eInsert) throw eInsert;
+        }
+      }
+
+      const totales = totalesDelCatalogo(empresaEnEdicion.sector, edicionRespuestas);
+      const { error: eEmpresa } = await supabase.from('companies').update({
+        name: edicionDatos.name.trim(),
+        rif: edicionDatos.rif.trim().toUpperCase(),
+        rtn: edicionDatos.rtn,
+        address: [edicionDatos.address, edicionDatos.city, edicionDatos.state]
+          .map(parte => (parte || '').trim()).filter(Boolean).join(', '),
+        phone: edicionDatos.phone,
+        email: edicionDatos.email,
+        total_score: totales.score,
+        total_percentage: totales.pct,
+        updated_at: new Date().toISOString()
+      }).eq('id', id);
+      if (eEmpresa) throw eEmpresa;
+
+      const resumen = `✅ Registro actualizado.\n\n${edicionDatos.name.trim()}\nPuntaje: ${totales.score} de ${totales.max} (${totales.pct}%)\nRespuestas modificadas: ${tocadas.length}`;
+      cerrarEdicionEmpresa();
+      await cargarEmpresas();
+      alert(resumen);
+    } catch (error) {
+      alert('Error al guardar los cambios: ' + error.message);
+    } finally {
+      setGuardandoEdicion(false);
+    }
+  };
+
+  const abrirBorradoEmpresa = (empresa, boton) => {
+    if (userRole !== 'admin') return;
+    if (modalAbierto) return;
+    botonDisparadorRef.current = boton || null;
+    setRifConfirmacion('');
+    setEmpresaABorrar(empresa);
+  };
+
+  const cerrarBorradoEmpresa = () => {
+    setEmpresaABorrar(null);
+    setRifConfirmacion('');
+    devolverFocoAlDisparador();
+  };
+
+  // Borra solo la fila de companies, por decisión explícita del usuario: las
+  // respuestas en answers, las filas de evidences y las fotos del bucket
+  // evidencias quedan huérfanas y las fotos siguen siendo públicas en su URL.
+  // La cuenta de usuario vinculada no se toca.
+  const confirmarBorradoEmpresa = async () => {
+    if (!empresaABorrar || borrando) return;
+    if (rifConfirmacion.trim().toUpperCase() !== (empresaABorrar.rif || '').toUpperCase()) return;
+    setBorrando(true);
+    const nombre = empresaABorrar.name;
+    const id = empresaABorrar.id;
+    try {
+      const { error } = await supabase.from('companies').delete().eq('id', id);
+      if (error) throw error;
+      cerrarBorradoEmpresa();
+      await cargarEmpresas();
+      alert(`Empresa "${nombre}" eliminada.\n\nSus respuestas y sus fotos de evidencia no se borran: quedan en la base y en Storage.`);
+    } catch (error) {
+      alert('Error al eliminar la empresa: ' + error.message);
+    } finally {
+      setBorrando(false);
+    }
+  };
+
+  // Se derivan en el render en vez de vivir en estado: dependen de
+  // empresaEnEdicion y edicionRespuestas, y un efecto que los sincronizara
+  // pintaría un frame con los totales viejos cada vez que se toca una respuesta.
+  const modulosEdicion = empresaEnEdicion ? getModulesBySector(empresaEnEdicion.sector) : [];
+  const totalesEdicion = empresaEnEdicion
+    ? totalesDelCatalogo(empresaEnEdicion.sector, edicionRespuestas)
+    : { score: 0, max: 0, pct: 0 };
+  const nivelEdicion = nivelDeAccesibilidad(totalesEdicion.pct);
+  const respuestasCambias = Object.keys({ ...respuestasOriginales, ...edicionRespuestas })
+    .filter(qId => edicionRespuestas[qId] !== respuestasOriginales[qId]).length;
+  const rifConfirmado = Boolean(empresaABorrar) &&
+    rifConfirmacion.trim().toUpperCase() === (empresaABorrar?.rif || '').toUpperCase();
+
+  // El resto de la app repite los literales de contraste en cada control, pero los
+  // modales de empresas tienen decenas de campos y la repetición no se podía leer.
+  const fondoModal = contrastMode === 'high-contrast'
+    ? 'bg-black border-2 border-white text-white'
+    : contrastMode === 'yellow-on-black'
+      ? 'bg-black border-2 border-yellow-300 text-yellow-300'
+      : 'bg-white text-slate-800';
+  const campoModal = contrastMode === 'high-contrast'
+    ? 'bg-black text-white border-white'
+    : contrastMode === 'yellow-on-black'
+      ? 'bg-black text-yellow-300 border-yellow-300'
+      : 'bg-slate-50 border-slate-200';
 
   const enviarResetPassword = async (email) => {
     if (userRole !== 'admin') return;
@@ -1902,6 +2151,8 @@ useEffect(() => {
                           <div className="flex gap-1.5">
                             <button onClick={() => generateCompanyReportWord(emp)} aria-label={`Descargar reporte de ${emp.name}`} title="Informe de accesibilidad" className="bg-indigo-600 text-white px-3 py-1 rounded-lg text-xs font-black"><span aria-hidden="true">📄</span></button>
                             <button onClick={() => generarCertificadoWord(emp)} aria-label={`Descargar certificado de ${emp.name}`} title="Certificado por nivel obtenido (solo Oro, Plata y Bronce)" className="bg-amber-600 text-white px-3 py-1 rounded-lg text-xs font-black"><span aria-hidden="true">🏅</span></button>
+                            <button onClick={(e) => abrirEdicionEmpresa(emp, e.currentTarget)} aria-label={`Modificar registro de ${emp.name}`} title="Modificar datos y respuestas de la auditoría" className="bg-slate-600 text-white px-3 py-1 rounded-lg text-xs font-black"><span aria-hidden="true">✏️</span></button>
+                            <button onClick={(e) => abrirBorradoEmpresa(emp, e.currentTarget)} aria-label={`Eliminar registro de ${emp.name}`} title="Eliminar empresa" className="bg-red-600 text-white px-3 py-1 rounded-lg text-xs font-black"><span aria-hidden="true">🗑️</span></button>
                           </div>
                         </td>
                       </tr>
@@ -1923,6 +2174,129 @@ useEffect(() => {
           )}
           <button onClick={() => setView('about')} className={`flex flex-col items-center gap-1.5 active:bg-teal-500 active:rounded-full active:p-1 ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}><Info size={24} /><span className="text-[9px] font-black">Acerca de</span></button>
         </nav>
+      )}
+
+      {userRole === 'admin' && empresaEnEdicion && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-3 sm:p-6">
+          <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="titulo-edicion-empresa" tabIndex={-1}
+            className={`w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-3xl shadow-2xl outline-none ${fondoModal}`}>
+
+            <div className={`sticky top-0 z-10 flex items-start justify-between gap-4 p-6 border-b ${contrastMode === 'normal-contrast' ? 'bg-white border-slate-200' : 'border-current'}`}>
+              <div>
+                <h2 id="titulo-edicion-empresa" className="text-lg font-black flex items-center gap-2"><Edit size={18} aria-hidden="true" /> Modificar registro</h2>
+                <p className="text-xs font-bold mt-1 opacity-80">{empresaEnEdicion.name} · RIF {empresaEnEdicion.rif} · Sector: {empresaEnEdicion.sector}</p>
+              </div>
+              <button onClick={cerrarEdicionEmpresa} disabled={guardandoEdicion} className="shrink-0 px-4 py-2 rounded-xl text-xs font-black border border-current disabled:opacity-40 active:bg-teal-500">Cerrar</button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              <section aria-labelledby="edicion-datos-titulo">
+                <h3 id="edicion-datos-titulo" className="text-sm font-black uppercase mb-3">Datos de la empresa</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div><label htmlFor="ed-nombre" className="text-[10px] font-black uppercase block mb-1">Nombre comercial *</label><input id="ed-nombre" className={`w-full border rounded-xl px-4 py-3 text-center ${campoModal}`} value={edicionDatos.name || ''} onChange={e => setEdicionDatos({ ...edicionDatos, name: e.target.value })} /></div>
+                  <div><label htmlFor="ed-rif" className="text-[10px] font-black uppercase block mb-1">RIF *</label><input id="ed-rif" className={`w-full border rounded-xl px-4 py-3 text-center uppercase ${campoModal}`} value={edicionDatos.rif || ''} onChange={e => setEdicionDatos({ ...edicionDatos, rif: e.target.value.toUpperCase() })} /></div>
+                  <div><label htmlFor="ed-rtn" className="text-[10px] font-black uppercase block mb-1">RTN (opcional)</label><input id="ed-rtn" className={`w-full border rounded-xl px-4 py-3 text-center ${campoModal}`} value={edicionDatos.rtn || ''} onChange={e => setEdicionDatos({ ...edicionDatos, rtn: e.target.value })} /></div>
+                  <div><label htmlFor="ed-telefono" className="text-[10px] font-black uppercase block mb-1">Teléfono</label><input id="ed-telefono" type="tel" className={`w-full border rounded-xl px-4 py-3 text-center ${campoModal}`} value={edicionDatos.phone || ''} onChange={e => setEdicionDatos({ ...edicionDatos, phone: e.target.value })} /></div>
+                  <div className="sm:col-span-2"><label htmlFor="ed-email" className="text-[10px] font-black uppercase block mb-1">Correo electrónico</label><input id="ed-email" type="email" className={`w-full border rounded-xl px-4 py-3 text-center ${campoModal}`} value={edicionDatos.email || ''} onChange={e => setEdicionDatos({ ...edicionDatos, email: e.target.value })} /></div>
+                  <div><label htmlFor="ed-estado" className="text-[10px] font-black uppercase block mb-1">Estado *</label>
+                    <select id="ed-estado" className={`w-full border rounded-xl px-4 py-3 text-center ${campoModal}`} value={edicionDatos.state || ''} onChange={e => setEdicionDatos({ ...edicionDatos, state: e.target.value, city: '' })}>
+                      <option value="">Seleccione</option>
+                      {venezuelaStates.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div><label htmlFor="ed-municipio" className="text-[10px] font-black uppercase block mb-1">Municipio *</label>
+                    <select id="ed-municipio" className={`w-full border rounded-xl px-4 py-3 text-center ${campoModal}`} value={edicionDatos.city || ''} disabled={!edicionDatos.state} onChange={e => setEdicionDatos({ ...edicionDatos, city: e.target.value })}>
+                      <option value="">Seleccione</option>
+                      {(municipalities[edicionDatos.state] || []).map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div className="sm:col-span-2"><label htmlFor="ed-direccion" className="text-[10px] font-black uppercase block mb-1">Dirección exacta *</label><input id="ed-direccion" className={`w-full border rounded-xl px-4 py-3 text-center ${campoModal}`} placeholder="Calle, número, referencia" value={edicionDatos.address || ''} onChange={e => setEdicionDatos({ ...edicionDatos, address: e.target.value })} /></div>
+                </div>
+                <p className="text-xs font-bold mt-3 opacity-70">El sector no se cambia desde aquí: define qué preguntas tiene la auditoría, y cambiarlo dejaría huérfanas las respuestas ya guardadas.</p>
+              </section>
+
+              <section aria-labelledby="edicion-respuestas-titulo">
+                <h3 id="edicion-respuestas-titulo" className="text-sm font-black uppercase mb-3">Respuestas de la auditoría</h3>
+                {cargandoEdicion ? (
+                  <p role="status" className="text-sm font-bold">Cargando respuestas guardadas…</p>
+                ) : modulosEdicion.length === 0 ? (
+                  <p className="text-sm font-bold flex items-center gap-2"><AlertTriangle size={16} aria-hidden="true" /> Este sector no tiene preguntas cargadas en el catálogo.</p>
+                ) : modulosEdicion.map(mod => (
+                  <fieldset key={mod.id} className={`rounded-2xl border p-4 mb-4 ${contrastMode === 'normal-contrast' ? 'border-slate-200' : 'border-current'}`}>
+                    <legend className="text-xs font-black px-2 uppercase">{mod.title}</legend>
+                    <p className="text-[10px] font-bold mb-3 opacity-70">{mod.description}</p>
+                    {mod.questions.map(q => {
+                      const actual = edicionRespuestas[q.id];
+                      const tocada = respuestasOriginales[q.id] !== actual;
+                      return (
+                        <div key={q.id} className={`flex flex-col sm:flex-row sm:items-center gap-2 py-2.5 border-b last:border-b-0 ${contrastMode === 'normal-contrast' ? 'border-slate-100' : 'border-current'}`}>
+                          <label htmlFor={`ed-resp-${q.id}`} className="text-xs font-bold flex-1">{q.text}</label>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${contrastMode === 'high-contrast' ? 'bg-yellow-300 text-black' : contrastMode === 'yellow-on-black' ? 'bg-yellow-300 text-black' : 'bg-indigo-50 text-indigo-600'}`}>{q.cat}</span>
+                            <select id={`ed-resp-${q.id}`} className={`border rounded-lg px-3 py-2 text-xs font-black ${campoModal}`}
+                              value={typeof actual === 'number' ? actual : ''}
+                              onChange={e => {
+                                const raw = e.target.value;
+                                setEdicionRespuestas(prev => {
+                                  const next = { ...prev };
+                                  if (raw === '') delete next[q.id];
+                                  else next[q.id] = Number(raw);
+                                  return next;
+                                });
+                              }}>
+                              <option value="">Sin responder</option>
+                              {[...Array(q.max + 1).keys()].map(i => <option key={i} value={i}>{i}</option>)}
+                            </select>
+                            {tocada && <span className="text-[9px] font-black text-amber-600">modificada</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </fieldset>
+                ))}
+              </section>
+            </div>
+
+            <div aria-live="polite" className={`mx-6 mb-4 rounded-2xl border p-4 text-sm font-bold ${contrastMode === 'normal-contrast' ? 'border-slate-200 bg-slate-50' : 'border-current'}`}>
+              <p>Puntaje: {totalesEdicion.score} de {totalesEdicion.max} ({totalesEdicion.pct}%) · {nivelEdicion.texto}</p>
+              <p className="text-xs mt-1 opacity-80">{respuestasCambias === 0 ? 'Sin cambios en las respuestas.' : `${respuestasCambias} respuesta(s) modificada(s).`}</p>
+            </div>
+
+            <div className={`sticky bottom-0 flex flex-col sm:flex-row gap-3 p-6 border-t ${contrastMode === 'normal-contrast' ? 'bg-white border-slate-200' : 'border-current'}`}>
+              <button onClick={cerrarEdicionEmpresa} disabled={guardandoEdicion} className="flex-1 px-6 py-3 rounded-xl text-sm font-black border border-current disabled:opacity-40 active:bg-teal-500">Cancelar</button>
+              <button onClick={guardarEdicionEmpresa} disabled={cargandoEdicion || guardandoEdicion} className="flex-1 px-6 py-3 rounded-xl text-sm font-black text-white bg-emerald-600 disabled:opacity-40 active:bg-teal-500">
+                {guardandoEdicion ? 'Guardando…' : 'Guardar cambios'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {userRole === 'admin' && empresaABorrar && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
+          <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="titulo-borrado-empresa" tabIndex={-1}
+            className={`w-full max-w-lg rounded-3xl shadow-2xl outline-none ${fondoModal}`}>
+            <div className="p-6">
+              <h2 id="titulo-borrado-empresa" className="text-lg font-black flex items-center gap-2 text-red-500"><AlertTriangle size={20} aria-hidden="true" /> Eliminar empresa</h2>
+              <p className="text-sm font-bold mt-4">Va a borrar el registro de <strong>{empresaABorrar.name}</strong> (RIF {empresaABorrar.rif}).</p>
+              <ul className="text-xs font-bold mt-3 space-y-1.5 list-disc pl-5 opacity-80">
+                <li>Se elimina únicamente la fila de la empresa.</li>
+                <li>Sus respuestas y sus fotos de evidencia no se borran: quedan en la base de datos y en Storage.</li>
+                <li>La cuenta de usuario vinculada sigue existiendo.</li>
+              </ul>
+              <label htmlFor="borrado-rif" className="text-[10px] font-black uppercase block mt-5">Escriba el RIF para confirmar *</label>
+              <input id="borrado-rif" autoComplete="off" aria-describedby="borrado-rif-ayuda" className={`w-full border rounded-xl px-4 py-3 text-center uppercase mt-1 ${campoModal}`} value={rifConfirmacion} onChange={e => setRifConfirmacion(e.target.value.toUpperCase())} />
+              <p id="borrado-rif-ayuda" className="text-xs font-bold mt-2 opacity-70">Debe coincidir exactamente con {empresaABorrar.rif}.</p>
+              {!rifConfirmado && rifConfirmacion.trim() !== '' && <p role="status" className="text-xs font-black text-red-500 mt-2">El RIF escrito no coincide.</p>}
+            </div>
+            <div className="flex flex-col sm:flex-row gap-3 p-6 pt-0">
+              <button onClick={cerrarBorradoEmpresa} disabled={borrando} className="flex-1 px-6 py-3 rounded-xl text-sm font-black border border-current disabled:opacity-40 active:bg-teal-500">Cancelar</button>
+              <button onClick={confirmarBorradoEmpresa} disabled={!rifConfirmado || borrando} className="flex-1 px-6 py-3 rounded-xl text-sm font-black text-white bg-red-600 disabled:opacity-40 active:bg-teal-500 flex items-center justify-center gap-2">
+                {borrando ? 'Eliminando…' : <><Trash2 size={16} aria-hidden="true" /> Eliminar</>}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
