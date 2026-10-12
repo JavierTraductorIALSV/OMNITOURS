@@ -13,6 +13,8 @@ import DisabilityPortal from './components/DisabilityPortal';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import { Document, Packer, Paragraph, TextRun, ImageRun, AlignmentType, Header, Table, TableRow, TableCell, WidthType, VerticalAlign } from 'docx';
+import { jsPDF } from 'jspdf';
+import fuenteCaligrafia from './assets/fuentes/GreatVibes-Regular.ttf';
 
 import { getModulesBySector, calcularPorcentajesPorDiscapacidad, coberturaAuditoria, FichasPorDiscapacidad } from './catalogoAccesibilidad';
 
@@ -119,6 +121,214 @@ const documentoConMembrete = (sections, header) => new Document({
     }
   }]
 });
+
+// btoa se atraganta con medio megabyte de una vez: se parte en bloques.
+const aBase64 = (bytes) => {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
+};
+
+// jsPDF no acepta ArrayBuffer: quiere un data URL. Se reutiliza la validación de
+// firma binaria del informe para no incrustar el index.html que devuelve el
+// _redirects cuando el estático no existe.
+const cargarAssetPdf = async (url) => {
+  const buf = await fetchImagenValidada(url);
+  if (!buf) return null;
+  const bytes = new Uint8Array(buf);
+  const esPng = bytes[0] === 0x89;
+  return { data: `data:image/${esPng ? 'png' : 'jpeg'};base64,${aBase64(bytes)}`, formato: esPng ? 'PNG' : 'JPEG' };
+};
+
+// Un PDF de 4 MB no viaja por correo ni por WhatsApp: el logo pesa 1 MB y el trofeo
+// medio, y ambos van colocados a 4 cm. Se reescalan a los píxeles que realmente
+// pide una impresión a 300 ppp en ese tamaño (~500 px) antes de incrustarlos.
+const redimensionarParaPdf = (asset, anchoMax, formato) => new Promise(resolve => {
+  if (!asset) return resolve(null);
+  const img = new Image();
+  img.onload = () => {
+    const escala = Math.min(1, anchoMax / img.width);
+    if (escala === 1 && asset.formato === (formato === 'jpeg' ? 'JPEG' : 'PNG')) return resolve(asset);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(img.width * escala));
+    canvas.height = Math.max(1, Math.round(img.height * escala));
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    resolve({ data: canvas.toDataURL(`image/${formato}`, 0.9), formato: formato === 'jpeg' ? 'JPEG' : 'PNG' });
+  };
+  img.onerror = () => resolve(null);
+  img.src = asset.data;
+});
+
+// El certificado se dibuja en milímetros sobre A4 apaisado. Los logos de
+// Omnitours traen fondo azul marino opaco y el trofeo es una fotografía con fondo
+// difuminado: no hay transparencia que recortar, así que cada pieza va enmarcada a
+// propósito para que su fondo propio se lea como parte del diseño y no como un
+// recuadro accidental sobre el crema.
+const dibujarCertificado = (doc, d) => {
+  const CREMA = [250, 244, 230];
+  const PANEL = [255, 253, 246];
+  const TINTA = [56, 40, 22];
+  const ORO = [172, 138, 62];
+  const ORO_OSCURO = [133, 104, 44];
+  const SUAVE = [122, 102, 72];
+  const NAVY = [4, 29, 49];
+  const colorNivel = d.nivelTexto.startsWith('ORO') ? [168, 132, 42]
+    : d.nivelTexto.startsWith('PLATA') ? [122, 126, 132]
+      : [146, 94, 52];
+  const centrado = (texto, x, y) => doc.text(texto, x, y, { align: 'center' });
+
+  doc.setFillColor(...CREMA);
+  doc.rect(0, 0, 297, 210, 'F');
+  doc.setDrawColor(...ORO);
+  doc.setLineWidth(0.5);
+  doc.rect(6, 6, 285, 198);
+  doc.setDrawColor(...ORO_OSCURO);
+  doc.setLineWidth(1.6);
+  doc.rect(8.5, 8.5, 280, 193);
+  doc.setDrawColor(...ORO);
+  doc.setLineWidth(0.5);
+  doc.rect(11, 11, 275, 188);
+  doc.setFillColor(...ORO_OSCURO);
+  [[8.5, 8.5], [288.5, 8.5], [8.5, 201.5], [288.5, 201.5]].forEach(([x, y]) => doc.circle(x, y, 1.3, 'F'));
+
+  if (d.imagenes.omni) {
+    doc.setFillColor(...NAVY);
+    doc.setDrawColor(...ORO);
+    doc.setLineWidth(0.6);
+    doc.rect(16, 16, 41.25, 30, 'FD');
+    doc.addImage(d.imagenes.omni.data, d.imagenes.omni.formato, 16, 16, 41.25, 30);
+  }
+  if (d.imagenes.iaet) {
+    doc.setFillColor(...PANEL);
+    doc.setDrawColor(...ORO);
+    doc.setLineWidth(0.6);
+    doc.rect(226.4, 16, 54.6, 30, 'FD');
+    doc.addImage(d.imagenes.iaet.data, d.imagenes.iaet.formato, 228.4, 18, 50.6, 26);
+  }
+
+  doc.setTextColor(...TINTA);
+  doc.setFont('times', 'bold');
+  doc.setFontSize(24);
+  doc.setCharSpace(2.2);
+  centrado('CERTIFICADO', 148.5, 28);
+  doc.setFontSize(10.5);
+  doc.setCharSpace(1.6);
+  doc.setTextColor(...ORO_OSCURO);
+  centrado('DE ACCESIBILIDAD TURÍSTICA', 148.5, 36);
+  doc.setCharSpace(0);
+  doc.setDrawColor(...ORO);
+  doc.setLineWidth(0.4);
+  doc.line(96, 40.5, 201, 40.5);
+  doc.setFillColor(...ORO_OSCURO);
+  doc.circle(148.5, 40.5, 0.9, 'F');
+
+  doc.setFont('times', 'italic');
+  doc.setFontSize(12);
+  doc.setTextColor(...SUAVE);
+  centrado('Omnitours e IAET otorgan el presente reconocimiento a', 148.5, 54);
+
+  doc.setFont('GreatVibes', 'normal');
+  doc.setTextColor(...TINTA);
+  let tam = 40;
+  doc.setFontSize(tam);
+  while (tam > 22 && doc.getTextWidth(d.nombre) > 235) {
+    tam -= 1;
+    doc.setFontSize(tam);
+  }
+  centrado(d.nombre, 148.5, 72);
+  doc.setDrawColor(...ORO);
+  doc.setLineWidth(0.4);
+  doc.line(118, 78, 179, 78);
+  doc.setFillColor(...ORO_OSCURO);
+  doc.circle(148.5, 78, 0.8, 'F');
+
+  doc.setFont('times', 'normal');
+  doc.setFontSize(12.5);
+  doc.setTextColor(...TINTA);
+  centrado('por haber superado la auditoría de accesibilidad turística', 105, 92);
+  centrado('y acreditar el nivel de accesibilidad', 105, 99);
+  doc.setFont('times', 'bold');
+  doc.setFontSize(20);
+  doc.setTextColor(...colorNivel);
+  centrado(d.nivelTexto, 105, 110);
+  doc.setDrawColor(...ORO);
+  doc.setLineWidth(0.4);
+  doc.line(60, 115, 150, 115);
+  doc.setFont('times', 'normal');
+  doc.setFontSize(11);
+  doc.setTextColor(...SUAVE);
+  centrado(`RIF ${d.rif}  ·  Sector ${d.sector}`, 105, 125);
+  centrado(`Emitido el ${d.emision}`, 105, 133);
+  centrado(`Válido hasta ${d.vencimiento}`, 105, 140);
+  doc.setFont('times', 'italic');
+  doc.setFontSize(9);
+  centrado('La vigencia está sujeta a que las condiciones auditadas se mantengan.', 105, 149);
+
+  if (d.imagenes.trofeo) {
+    doc.setFillColor(...PANEL);
+    doc.setDrawColor(...ORO);
+    doc.setLineWidth(0.8);
+    doc.rect(204, 88, 49, 47.2, 'FD');
+    doc.setLineWidth(0.4);
+    doc.rect(205.2, 89.2, 46.6, 44.8);
+    doc.addImage(d.imagenes.trofeo.data, d.imagenes.trofeo.formato, 206.5, 90.5, 44, 42.2);
+  }
+  doc.setFont('times', 'bold');
+  doc.setFontSize(26);
+  doc.setTextColor(...colorNivel);
+  centrado(`${d.pct}%`, 228.5, 147);
+  doc.setFontSize(8);
+  doc.setCharSpace(1.2);
+  doc.setTextColor(...ORO_OSCURO);
+  centrado('CUMPLIMIENTO GENERAL', 228.5, 153);
+  doc.setCharSpace(0);
+  doc.setDrawColor(...ORO);
+  doc.setLineWidth(0.4);
+  doc.line(210, 157.5, 247, 157.5);
+
+  doc.setDrawColor(...TINTA);
+  doc.setLineWidth(0.4);
+  doc.line(45, 178, 105, 178);
+  doc.setFont('times', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(...TINTA);
+  centrado(d.firmante, 75, 183);
+  doc.setFont('times', 'normal');
+  doc.setFontSize(9.5);
+  doc.setTextColor(...SUAVE);
+  centrado(d.cargo, 75, 188.5);
+
+  doc.setDrawColor(...ORO_OSCURO);
+  doc.setLineWidth(0.8);
+  doc.circle(148.5, 176, 14, 'S');
+  doc.setDrawColor(...ORO);
+  doc.setLineWidth(0.4);
+  doc.circle(148.5, 176, 11, 'S');
+  doc.setFont('times', 'bold');
+  doc.setFontSize(6.5);
+  doc.setTextColor(...ORO_OSCURO);
+  centrado('OMNITOURS · IAET', 148.5, 172.5);
+  doc.setFontSize(6);
+  centrado('ACCESIBILIDAD', 148.5, 177.5);
+  centrado('TURÍSTICA', 148.5, 181.5);
+  doc.setFontSize(5.5);
+  centrado('VENEZUELA', 148.5, 185.5);
+
+  doc.setFontSize(7);
+  doc.setCharSpace(1);
+  doc.setTextColor(...ORO_OSCURO);
+  centrado('FOLIO', 228.5, 175);
+  doc.setCharSpace(0);
+  doc.setFontSize(12);
+  doc.setTextColor(...TINTA);
+  centrado(d.rif, 228.5, 181);
+  doc.setFont('times', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(...SUAVE);
+  centrado(`Emitido por Omnitours e IAET · ${new Date().getFullYear()}`, 228.5, 187);
+};
 
 // El nivel se decide con el promedio de los porcentajes por módulo. Es el mismo
 // criterio para el informe y para el certificado: si cada documento usara el suyo
@@ -1519,7 +1729,9 @@ useEffect(() => {
   // emite desde Bronce hacia arriba; a una empresa Normal o Inaccesible se le
   // explica por qué no hay certificado en vez de darle un documento que no la
   // acredita.
-  const generarCertificadoWord = async (company) => {
+  // Va en PDF y no en Word: es un documento para entregar e imprimir, y Word
+  // invitaría a editarlo. El informe técnico sigue siendo .docx a propósito.
+  const generarCertificadoPdf = async (company) => {
     try {
       const { data: respuestas } = await supabase.from('answers').select('*').eq('company_id', company.id);
       if (!respuestas || respuestas.length === 0) {
@@ -1529,6 +1741,9 @@ useEffect(() => {
       const respuestasMap = {};
       respuestas.forEach(r => respuestasMap[r.question_id] = r.score);
 
+      // Mismo criterio del informe: promedio de los porcentajes por módulo. Si el
+      // certificado mostrara total_percentage (puntos sobre el máximo) podría
+      // decir un número distinto al nivel que acredita en el mismo documento.
       const totalPct = promedioDeModulos(puntajesPorModulo(company.sector, respuestasMap));
       const nivel = nivelDeAccesibilidad(totalPct);
 
@@ -1541,36 +1756,31 @@ useEffect(() => {
       const vencimiento = new Date(emision);
       vencimiento.setFullYear(vencimiento.getFullYear() + 1);
 
-      const [trofeoBuffer, header] = await Promise.all([fetchImagenValidada(nivel.trofeo), membreteOmniIaet()]);
+      const [omni, iaet, trofeo, fuenteBase64] = await Promise.all([
+        cargarAssetPdf('/Logo-OmniTours.png').then(a => redimensionarParaPdf(a, 500, 'jpeg')),
+        cargarAssetPdf('/iaet-logo.png').then(a => redimensionarParaPdf(a, 620, 'png')),
+        cargarAssetPdf(nivel.trofeo).then(a => redimensionarParaPdf(a, 560, 'jpeg')),
+        fetch(fuenteCaligrafia).then(r => r.arrayBuffer()).then(buf => aBase64(new Uint8Array(buf)))
+      ]);
 
-      const centrado = (texto, opts = {}, spacing) => new Paragraph({
-        children: [new TextRun({ text: texto, ...opts })],
-        alignment: AlignmentType.CENTER,
-        ...(spacing ? { spacing } : {})
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      doc.addFileToVFS('GreatVibes-Regular.ttf', fuenteBase64);
+      doc.addFont('GreatVibes-Regular.ttf', 'GreatVibes', 'normal');
+      dibujarCertificado(doc, {
+        nombre: company.name,
+        rif: company.rif,
+        sector: (sectors.find(s => s.id === company.sector) || {}).label || company.sector,
+        nivelTexto: nivel.texto,
+        pct: Math.round(totalPct),
+        emision: fechaLarga(emision),
+        vencimiento: fechaLarga(vencimiento),
+        firmante: 'Dr. Juan E. Luján A.',
+        cargo: 'Validador de Accesibilidad Turística',
+        imagenes: { omni, iaet, trofeo }
       });
-
-      const sections = [
-        centrado('CERTIFICADO DE ACCESIBILIDAD TURÍSTICA', { bold: true, size: 32, color: '4F46E5' }, { after: 120 }),
-        centrado('Omnitours e IAET certifican que', { size: 22 }, { after: 400 }),
-        centrado(company.name.toUpperCase(), { bold: true, size: 36 }, { after: 120 }),
-        centrado(`RIF: ${company.rif} | Sector: ${company.sector}`, { size: 20 }, { after: 400 }),
-        centrado('ha superado la auditoría de accesibilidad turística y ha obtenido el nivel', { size: 22 }, { after: 160 }),
-        centrado(nivel.texto, { bold: true, size: 30, color: '4F46E5' }, { after: 60 }),
-        centrado(`con un cumplimiento del ${Math.round(totalPct)}%`, { size: 22 }, { after: 240 }),
-        trofeoBuffer
-          ? new Paragraph({ children: [imagenEnReporte(trofeoBuffer, 150)], alignment: AlignmentType.CENTER, spacing: { after: 320 } })
-          : new Paragraph({ text: '', spacing: { after: 320 } }),
-        centrado(`Emitido el ${fechaLarga(emision)}`, { size: 20 }),
-        centrado(`Válido hasta el ${fechaLarga(vencimiento)}`, { size: 20 }, { after: 120 }),
-        centrado('La vigencia está sujeta a que las condiciones auditadas se mantengan.', { italics: true, size: 18, color: '64748B' }, { after: 480 }),
-        centrado('Dr. Juan E. Luján A.', { bold: true }),
-        centrado('Validador de Accesibilidad Turística')
-      ];
-
-      const blob = await Packer.toBlob(documentoConMembrete(sections, header));
-      saveAs(blob, `certificado_${company.rif}.docx`);
+      doc.save(`certificado_${company.rif}.pdf`);
     } catch (error) {
-      console.error('Error generando certificado Word:', error);
+      console.error('Error generando certificado PDF:', error);
       alert('Error al generar el certificado: ' + error.message);
     }
   };
@@ -2094,7 +2304,7 @@ useEffect(() => {
                       <div><p className={`font-bold ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{searchResult.empresa.name}</p><p className={`text-xs ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>RIF: {searchResult.empresa.rif} | Score: {searchResult.empresa.total_percentage}%</p></div>
                       <div className="flex gap-2">
                         <button onClick={() => generateCompanyReportWord(searchResult.empresa)} className="bg-green-600 text-white px-4 py-2 rounded-xl text-sm font-black active:bg-teal-500">📄 Reporte Word</button>
-                        <button onClick={() => generarCertificadoWord(searchResult.empresa)} className="bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-black active:bg-teal-500">🏅 Certificado</button>
+                        <button onClick={() => generarCertificadoPdf(searchResult.empresa)} className="bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-black active:bg-teal-500">🏅 Certificado PDF</button>
                       </div>
                     </div>
                   ) : (
@@ -2150,7 +2360,7 @@ useEffect(() => {
                         <td className="px-4 py-3">
                           <div className="flex gap-1.5">
                             <button onClick={() => generateCompanyReportWord(emp)} aria-label={`Descargar reporte de ${emp.name}`} title="Informe de accesibilidad" className="bg-indigo-600 text-white px-3 py-1 rounded-lg text-xs font-black"><span aria-hidden="true">📄</span></button>
-                            <button onClick={() => generarCertificadoWord(emp)} aria-label={`Descargar certificado de ${emp.name}`} title="Certificado por nivel obtenido (solo Oro, Plata y Bronce)" className="bg-amber-600 text-white px-3 py-1 rounded-lg text-xs font-black"><span aria-hidden="true">🏅</span></button>
+                            <button onClick={() => generarCertificadoPdf(emp)} aria-label={`Descargar certificado en PDF de ${emp.name}`} title="Certificado en PDF por nivel obtenido (solo Oro, Plata y Bronce)" className="bg-amber-600 text-white px-3 py-1 rounded-lg text-xs font-black"><span aria-hidden="true">🏅</span></button>
                             <button onClick={(e) => abrirEdicionEmpresa(emp, e.currentTarget)} aria-label={`Modificar registro de ${emp.name}`} title="Modificar datos y respuestas de la auditoría" className="bg-slate-600 text-white px-3 py-1 rounded-lg text-xs font-black"><span aria-hidden="true">✏️</span></button>
                             <button onClick={(e) => abrirBorradoEmpresa(emp, e.currentTarget)} aria-label={`Eliminar registro de ${emp.name}`} title="Eliminar empresa" className="bg-red-600 text-white px-3 py-1 rounded-lg text-xs font-black"><span aria-hidden="true">🗑️</span></button>
                           </div>
