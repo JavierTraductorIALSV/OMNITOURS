@@ -1838,9 +1838,9 @@ useEffect(() => {
       <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 p-4">
         <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full">
           <img
-            src="/Logo-OmniTours.png"
+            src="/logo-omnitours-vertical.png"
             alt="Omnitours"
-            className="w-32 sm:w-40 md:w-48 lg:w-56 mx-auto mb-6 h-auto"
+            className="w-32 sm:w-36 md:w-40 lg:w-48 mx-auto mb-6 h-auto"
           />
           <h1 className="text-2xl font-black text-center mb-2">OmniTour</h1>
           <p className="text-center text-slate-500 text-sm mb-6">Inicia sesión para continuar</p>
@@ -1924,9 +1924,9 @@ useEffect(() => {
       <header className={`bg-white/90 backdrop-blur-md p-4 shadow-sm flex justify-between items-center sticky top-0 z-50 border-b ${contrastMode === 'high-contrast' ? 'bg-black border-white' : ''} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300' : ''}`}>
         <div className="flex items-center gap-3">
           <img
-            src="/Logo-OmniTours.png"
+            src="/logo-omnitours-horizontal.png"
             alt="Omnitours"
-            className="h-12 sm:h-14 md:h-16 lg:h-20 xl:h-24 w-auto"
+            className="h-9 sm:h-12 md:h-14 lg:h-16 xl:h-20 w-auto"
           />
           <div className="text-xs">
             <span className={`font-black ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-800'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{user.email}</span>
@@ -2020,7 +2020,7 @@ useEffect(() => {
               <h3 className={`text-sm font-black uppercase tracking-widest mb-4 ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Aliados y apoyo</h3>
               <div className="flex justify-center items-center gap-8 flex-wrap">
                 <img src="/iaet-logo.png" alt="IAET" className="h-12 w-auto opacity-70" />
-                <img src="/Logo-OmniTours.png" alt="Omnitours" className="h-12 w-auto opacity-70" />
+                <img src="/logo-omnitours-horizontal.png" alt="Omnitours" className="h-12 w-auto opacity-70" />
                 <div className={`text-xs font-bold ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Instituto de Altos Estudios Transdisciplinarios</div>
               </div>
             </div>
