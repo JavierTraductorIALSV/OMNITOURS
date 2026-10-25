@@ -92,14 +92,14 @@ const fetchImagenValidada = async (url) => {
 
 const membreteOmniIaet = async () => {
   const [omni, iaet] = await Promise.all([
-    fetchImagenValidada('/Logo-OmniTours.png'),
+    fetchImagenValidada('/logo-omnitours-horizontal.png'),
     fetchImagenValidada('/iaet-logo.png')
   ]);
   return new Header({
     children: [
       new Paragraph({
         children: [
-          omni ? imagenEnReporte(omni, 100) : new TextRun(''),
+          omni ? imagenEnReporte(omni, 160) : new TextRun(''),
           new TextRun('      '),
           iaet ? imagenEnReporte(iaet, 50) : new TextRun('')
         ],
@@ -142,9 +142,10 @@ const cargarAssetPdf = async (url) => {
   return { data: `data:image/${esPng ? 'png' : 'jpeg'};base64,${aBase64(bytes)}`, formato: esPng ? 'PNG' : 'JPEG' };
 };
 
-// Un PDF de 4 MB no viaja por correo ni por WhatsApp: el logo pesa 1 MB y el trofeo
-// medio, y ambos van colocados a 4 cm. Se reescalan a los píxeles que realmente
-// pide una impresión a 300 ppp en ese tamaño (~500 px) antes de incrustarlos.
+// Un PDF de 4 MB no viaja por correo ni por WhatsApp: el trofeo pesa medio
+// megabyte y va colocado a unos 4 cm. Se reescalan los assets a los píxeles que
+// realmente pide una impresión a 300 ppp en ese tamaño (~500-600 px) antes de
+// incrustarlos.
 const redimensionarParaPdf = (asset, anchoMax, formato) => new Promise(resolve => {
   if (!asset) return resolve(null);
   const img = new Image();
@@ -161,11 +162,10 @@ const redimensionarParaPdf = (asset, anchoMax, formato) => new Promise(resolve =
   img.src = asset.data;
 });
 
-// El certificado se dibuja en milímetros sobre A4 apaisado. Los logos de
-// Omnitours traen fondo azul marino opaco y el trofeo es una fotografía con fondo
-// difuminado: no hay transparencia que recortar, así que cada pieza va enmarcada a
-// propósito para que su fondo propio se lea como parte del diseño y no como un
-// recuadro accidental sobre el crema.
+// El certificado se dibuja en milímetros sobre A4 apaisado. El logo de Omnitours
+// es un PNG transparente y va sobre panel claro con filete dorado, igual que el de
+// IAET; el trofeo sí es una fotografía con fondo difuminado, así que su marco se
+// lee como parte del diseño y no como un recuadro accidental sobre el crema.
 const dibujarCertificado = (doc, d) => {
   const CREMA = [250, 244, 230];
   const PANEL = [255, 253, 246];
@@ -173,7 +173,6 @@ const dibujarCertificado = (doc, d) => {
   const ORO = [172, 138, 62];
   const ORO_OSCURO = [133, 104, 44];
   const SUAVE = [122, 102, 72];
-  const NAVY = [4, 29, 49];
   const colorNivel = d.nivelTexto.startsWith('ORO') ? [168, 132, 42]
     : d.nivelTexto.startsWith('PLATA') ? [122, 126, 132]
       : [146, 94, 52];
@@ -194,11 +193,11 @@ const dibujarCertificado = (doc, d) => {
   [[8.5, 8.5], [288.5, 8.5], [8.5, 201.5], [288.5, 201.5]].forEach(([x, y]) => doc.circle(x, y, 1.3, 'F'));
 
   if (d.imagenes.omni) {
-    doc.setFillColor(...NAVY);
+    doc.setFillColor(...PANEL);
     doc.setDrawColor(...ORO);
     doc.setLineWidth(0.6);
-    doc.rect(16, 16, 41.25, 30, 'FD');
-    doc.addImage(d.imagenes.omni.data, d.imagenes.omni.formato, 16, 16, 41.25, 30);
+    doc.rect(16, 20.45, 64, 21.1, 'FD');
+    doc.addImage(d.imagenes.omni.data, d.imagenes.omni.formato, 18, 22.45, 60, 17.1);
   }
   if (d.imagenes.iaet) {
     doc.setFillColor(...PANEL);
@@ -1758,7 +1757,7 @@ useEffect(() => {
       vencimiento.setFullYear(vencimiento.getFullYear() + 1);
 
       const [omni, iaet, trofeo, fuenteBase64] = await Promise.all([
-        cargarAssetPdf('/Logo-OmniTours.png').then(a => redimensionarParaPdf(a, 500, 'jpeg')),
+        cargarAssetPdf('/logo-omnitours-horizontal.png').then(a => redimensionarParaPdf(a, 600, 'png')),
         cargarAssetPdf('/iaet-logo.png').then(a => redimensionarParaPdf(a, 620, 'png')),
         cargarAssetPdf(nivel.trofeo).then(a => redimensionarParaPdf(a, 560, 'jpeg')),
         fetch(fuenteCaligrafia).then(r => r.arrayBuffer()).then(buf => aBase64(new Uint8Array(buf)))
