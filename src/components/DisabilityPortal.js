@@ -480,7 +480,7 @@ const DisabilityPortal = ({ onBack }) => {
               onClick={() => { setView('register'); setErrorMsg(''); }}
               className="text-purple-600 font-black text-sm flex items-center gap-1 mx-auto"
             >
-              Regístrate aquí <ArrowRight size={14} />
+              Regístrate aquí <ArrowRight size={14} aria-hidden="true" />
             </button>
           </div>
 
@@ -488,7 +488,7 @@ const DisabilityPortal = ({ onBack }) => {
             onClick={() => onBack && onBack()}
             className="mt-6 w-full text-slate-600 text-xs font-black"
           >
-            ← Volver al inicio
+            <span aria-hidden="true">←</span> Volver al inicio
           </button>
         </div>
       </div>
@@ -601,7 +601,7 @@ const DisabilityPortal = ({ onBack }) => {
             onClick={() => onBack && onBack()}
             className="mt-6 w-full text-slate-600 text-xs font-black"
           >
-            ← Volver al inicio
+            <span aria-hidden="true">←</span> Volver al inicio
           </button>
         </div>
       </div>
@@ -665,7 +665,7 @@ const DisabilityPortal = ({ onBack }) => {
             onClick={() => { setView('login'); setErrorMsg(''); setResetSent(false); }}
             className="mt-6 w-full text-slate-600 text-xs font-black"
           >
-            ← Volver a iniciar sesión
+            <span aria-hidden="true">←</span> Volver a iniciar sesión
           </button>
         </div>
       </div>
@@ -727,7 +727,7 @@ const DisabilityPortal = ({ onBack }) => {
             }}
             className="mt-6 w-full text-slate-600 text-xs font-black"
           >
-            ← Volver a iniciar sesión
+            <span aria-hidden="true">←</span> Volver a iniciar sesión
           </button>
         </div>
       </div>
@@ -741,7 +741,7 @@ const DisabilityPortal = ({ onBack }) => {
         <div className="max-w-6xl mx-auto flex justify-between items-center">
           <div>
             <h1 ref={tituloRef} tabIndex={-1} className="text-lg font-black text-purple-700">
-              Hola, {profile?.full_name || user?.email?.split('@')[0]} 👋
+              Hola, {profile?.full_name || user?.email?.split('@')[0]} <span aria-hidden="true">👋</span>
             </h1>
             <p className="text-xs text-slate-500">
               {profile?.disability_type} · {profile?.state} · {profile?.age} años
@@ -751,12 +751,12 @@ const DisabilityPortal = ({ onBack }) => {
             onClick={handleLogout}
             className="text-red-500 text-xs flex items-center gap-1 font-black px-3 py-2 rounded-lg hover:bg-red-50"
           >
-            <LogOut size={16} /> Salir
+            <LogOut size={16} aria-hidden="true" /> Salir
           </button>
         </div>
       </header>
 
-      <div className="max-w-6xl mx-auto p-4">
+      <main aria-label="Lugares accesibles" className="max-w-6xl mx-auto p-4">
         <div className="bg-gradient-to-r from-purple-600 to-pink-600 text-white p-6 rounded-3xl mb-6 shadow-lg">
           <h2 className="text-2xl font-black mb-2">Consulta lugares accesibles</h2>
           <p className="text-sm opacity-90">
@@ -795,6 +795,15 @@ const DisabilityPortal = ({ onBack }) => {
         </div>
 
         {/* Resultados */}
+        {/* TalkBack no ve que la lista cambió al filtrar: el contador sr-only con
+            role=status es el único aviso de cuántos lugares quedaron (4.1.3). */}
+        {!loading && (
+          <p role="status" className="sr-only">
+            {filteredRecommendations.length === 0
+              ? 'No se encontraron lugares con esos filtros.'
+              : `${filteredRecommendations.length} ${filteredRecommendations.length === 1 ? 'lugar encontrado' : 'lugares encontrados'}.`}
+          </p>
+        )}
         {loading ? (
           <div role="status" className="text-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-600 mx-auto"></div>
@@ -837,7 +846,7 @@ const DisabilityPortal = ({ onBack }) => {
                       </div>
                       <img
                         src={getAchievementImage(company.total_percentage)}
-                        alt="Nivel"
+                        alt={`Trofeo nivel ${nivelTexto}, ${company.total_percentage || 0}%`}
                         className="w-14 h-14 flex-shrink-0"
                       />
                     </div>
@@ -862,12 +871,14 @@ const DisabilityPortal = ({ onBack }) => {
                           <Star
                             key={s}
                             size={18}
+                            aria-hidden="true"
                             className={s <= stars ? 'text-yellow-400 fill-yellow-400' : 'text-slate-300'}
                           />
                         ))}
-                        <span className="ml-2 text-xs font-black text-slate-700">
+                        <span aria-hidden="true" className="ml-2 text-xs font-black text-slate-700">
                           {stars}/5
                         </span>
+                        <span className="sr-only">Calificación: {stars} de 5 estrellas.</span>
                       </div>
                       <p className="text-xs font-bold text-slate-700 text-center">
                         {nivelTexto}
@@ -886,19 +897,19 @@ const DisabilityPortal = ({ onBack }) => {
                     </div>
 
                     <div className="flex items-center gap-1 text-green-600 text-xs font-black mb-2">
-                      <CheckCircle size={14} />
+                      <CheckCircle size={14} aria-hidden="true" />
                       <span>Verificado por IAET</span>
                     </div>
 
                     {company.total_percentage >= 75 && (
                       <div className="bg-green-50 text-green-700 text-xs font-bold px-3 py-2 rounded-xl flex items-center gap-1">
-                        <Award size={14} /> Altamente recomendado para ti
+                        <Award size={14} aria-hidden="true" /> Altamente recomendado para ti
                       </div>
                     )}
 
                     {company.total_percentage < 50 && (
                       <div className="bg-red-50 text-red-700 text-xs font-bold px-3 py-2 rounded-xl">
-                        ⚠️ Aún no cumple con los estándares mínimos
+                        <span aria-hidden="true">⚠️</span> Aún no cumple con los estándares mínimos
                       </div>
                     )}
 
@@ -921,7 +932,7 @@ const DisabilityPortal = ({ onBack }) => {
             })}
           </div>
         )}
-      </div>
+      </main>
     </div>
   );
 };

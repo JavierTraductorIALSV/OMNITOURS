@@ -216,25 +216,29 @@ export const FichasPorDiscapacidad = ({ grupos, empresa, cobertura }) => (
       aria-label={`Accesibilidad por tipo de discapacidad${empresa ? ` de ${empresa}` : ''}`}
       className="grid grid-cols-3 gap-1.5"
     >
-      {grupos.map(g => (
+      {grupos.map(g => {
+        // TalkBack ignora title en elementos no interactivos: el desglose debe
+        // ir también en aria-label o el usuario ciego solo oye "Motora, 80%".
+        const detalle = g.n === 0
+          ? `${g.label}: este sector no tiene preguntas de ese tipo`
+          : g.pct === null
+            ? `${g.label}: sin respuestas registradas (${g.n} pregunta${g.n === 1 ? '' : 's'})`
+            : `${g.label}: ${g.pct}% calculado sobre ${g.respondidas} de ${g.n} pregunta${g.n === 1 ? '' : 's'} evaluada${g.n === 1 ? '' : 's'}`;
+        return (
         <div
           key={g.id}
-          title={
-            g.n === 0
-              ? `${g.label}: este sector no tiene preguntas de ese tipo`
-              : g.pct === null
-                ? `${g.label}: sin respuestas registradas (${g.n} pregunta${g.n === 1 ? '' : 's'})`
-                : `${g.label}: ${g.pct}% calculado sobre ${g.respondidas} de ${g.n} pregunta${g.n === 1 ? '' : 's'} evaluada${g.n === 1 ? '' : 's'}`
-          }
+          title={detalle}
+          aria-label={detalle}
           className="bg-slate-50 rounded-lg px-1 py-1.5 flex flex-col items-center gap-0.5 text-center"
         >
           {g.logo
             ? <img src={g.logo} alt="" aria-hidden="true" className="w-6 h-6 object-contain" />
             : <span aria-hidden="true" className="w-6 h-6 flex items-center justify-center text-slate-400 text-sm font-black">ND</span>}
-          <span className="text-[9px] font-bold text-slate-600 leading-none">{g.label}</span>
-          <span className="text-[11px] font-black text-slate-800 leading-none">{g.pct === null ? '—' : `${g.pct}%`}</span>
+          <span aria-hidden="true" className="text-[9px] font-bold text-slate-600 leading-none">{g.label}</span>
+          <span aria-hidden="true" className="text-[11px] font-black text-slate-800 leading-none">{g.pct === null ? '—' : `${g.pct}%`}</span>
         </div>
-      ))}
+        );
+      })}
     </div>
     {cobertura && cobertura.respondidas > 0 && cobertura.respondidas < cobertura.total && (
       <p className="text-[9px] font-bold text-amber-700 mt-1">
