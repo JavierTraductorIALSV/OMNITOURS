@@ -62,6 +62,20 @@ const DisabilityPortal = ({ onBack }) => {
     window.scrollTo({ top: 0 });
   }, [view]);
 
+  // WCAG 2.4.2: el título debe reflejar la pantalla actual. App.js no escribe
+  // document.title mientras el portal está abierto; el dueño es este efecto.
+  useEffect(() => {
+    const titulos = {
+      loading: 'Cargando',
+      login: 'Iniciar sesión',
+      register: 'Crear cuenta',
+      forgot: 'Recuperar acceso',
+      reset: 'Nueva contraseña',
+      recommendations: 'Lugares accesibles'
+    };
+    document.title = `${titulos[view] || 'Portal'} · Portal de discapacidad OmniTour`;
+  }, [view]);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -442,6 +456,7 @@ const DisabilityPortal = ({ onBack }) => {
           <form onSubmit={handleLogin} className="space-y-4">
             <input
               type="email"
+              autoComplete="email"
               aria-label="Correo Electrónico"
               placeholder="Correo Electrónico"
               required
@@ -451,6 +466,7 @@ const DisabilityPortal = ({ onBack }) => {
             />
             <input
               type="password"
+              autoComplete="current-password"
               aria-label="Contraseña"
               placeholder="Contraseña"
               required
@@ -513,6 +529,7 @@ const DisabilityPortal = ({ onBack }) => {
           <form onSubmit={handleRegister} className="space-y-3">
             <input
               type="text"
+              autoComplete="given-name"
               aria-label="Nombre"
               placeholder="Nombre"
               required
@@ -522,6 +539,7 @@ const DisabilityPortal = ({ onBack }) => {
             />
             <input
               type="text"
+              autoComplete="family-name"
               aria-label="Apellido"
               placeholder="Apellido"
               required
@@ -531,6 +549,7 @@ const DisabilityPortal = ({ onBack }) => {
             />
             <input
               type="email"
+              autoComplete="email"
               aria-label="Correo Electrónico"
               placeholder="Correo Electrónico"
               required
@@ -540,6 +559,7 @@ const DisabilityPortal = ({ onBack }) => {
             />
             <input
               type="password"
+              autoComplete="new-password"
               aria-label="Contraseña, mínimo 6 caracteres"
               placeholder="Contraseña (mínimo 6 caracteres)"
               required
@@ -643,6 +663,7 @@ const DisabilityPortal = ({ onBack }) => {
               <form onSubmit={handleForgotPassword} className="space-y-4">
                 <input
                   type="email"
+                  autoComplete="email"
                   aria-label="Correo Electrónico"
                   placeholder="Correo Electrónico"
                   required
@@ -692,6 +713,7 @@ const DisabilityPortal = ({ onBack }) => {
           <form onSubmit={handleResetPassword} className="space-y-4">
             <input
               type="password"
+              autoComplete="new-password"
               aria-label="Nueva contraseña, mínimo 6 caracteres"
               placeholder="Nueva contraseña (mínimo 6 caracteres)"
               required
@@ -702,6 +724,7 @@ const DisabilityPortal = ({ onBack }) => {
             />
             <input
               type="password"
+              autoComplete="new-password"
               aria-label="Repite la nueva contraseña"
               placeholder="Repite la nueva contraseña"
               required

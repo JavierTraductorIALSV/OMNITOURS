@@ -546,6 +546,23 @@ const App = () => {
     node.scrollTo({ top: 0 });
   }, [view, showDisabilityPortal]);
 
+  // Sin router el <title> no cambia nunca y el lector de pantalla no puede
+  // anunciar en qué pantalla se está (WCAG 2.4.2). Con el portal abierto el
+  // título lo gestiona DisabilityPortal: si se escribiera también aquí, este
+  // efecto (que corre después, por ser el padre) pisaría el de la vista.
+  useEffect(() => {
+    if (showDisabilityPortal) return;
+    const titulos = {
+      home: 'Inicio',
+      registration: 'Registro de empresa',
+      audit: 'Auditoría de accesibilidad',
+      results: 'Resultados',
+      about: 'Acerca de OmniTour',
+      adminDashboard: 'Panel de administración'
+    };
+    document.title = `${titulos[view] || 'OmniTour'} · OmniTour`;
+  }, [view, showDisabilityPortal]);
+
   // Un modal tiene que recibir el foco al abrirse y cerrarse con Esc: si no, el
   // foco se queda en el botón de la tabla, detrás del overlay (WCAG 2.4.3).
   const modalAbierto = Boolean(empresaEnEdicion || empresaABorrar);
@@ -1850,6 +1867,7 @@ useEffect(() => {
               <input
                 id="login-email"
                 type="email"
+                autoComplete="email"
                 className="w-full border rounded-xl px-4 py-3 mt-1 focus:ring-2 focus:ring-indigo-500 outline-none"
                 value={loginEmail}
                 onChange={(e) => setLoginEmail(e.target.value)}
@@ -1861,6 +1879,7 @@ useEffect(() => {
               <input
                 id="login-password"
                 type="password"
+                autoComplete="current-password"
                 className="w-full border rounded-xl px-4 py-3 mt-1 focus:ring-2 focus:ring-indigo-500 outline-none"
                 value={loginPassword}
                 onChange={(e) => setLoginPassword(e.target.value)}
@@ -1915,7 +1934,7 @@ useEffect(() => {
       />
 
       {uploadMessage.show && (
-        <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-4 py-2 rounded-full shadow-lg text-white text-sm font-bold ${uploadMessage.type === 'success' ? 'bg-green-500' : 'bg-red-500'}`}>
+        <div role={uploadMessage.type === 'success' ? 'status' : 'alert'} className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-4 py-2 rounded-full shadow-lg text-white text-sm font-bold ${uploadMessage.type === 'success' ? 'bg-green-500' : 'bg-red-500'}`}>
           {uploadMessage.text}
         </div>
       )}
@@ -2060,14 +2079,14 @@ useEffect(() => {
             <div className={`p-6 rounded-3xl shadow border ${contrastMode === 'high-contrast' ? 'bg-black border-white text-white' : 'bg-white'} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300 text-yellow-300' : ''}`}>
               <h2 className="text-xl font-black mb-6 flex items-center justify-center gap-2"><Building2 size={24} className={`${contrastMode === 'high-contrast' ? 'text-yellow-300' : 'text-indigo-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`} /> Datos del Prestador</h2>
               <div className="space-y-4">
-                <div><label htmlFor="reg-nombre" className="text-[10px] font-black uppercase block text-center">Nombre Comercial *</label><input id="reg-nombre" className={`w-full border rounded-xl px-4 py-3 text-center ${registrationErrors.name ? 'border-red-500' : 'border-slate-200'} ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.name} onChange={e => setCompanyData({...companyData, name: e.target.value})} />{registrationErrors.name && <p className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.name}</p>}</div>
-                <div><label htmlFor="reg-rif" className="text-[10px] font-black uppercase block text-center">RIF *</label><input id="reg-rif" className={`w-full border rounded-xl px-4 py-3 text-center uppercase ${registrationErrors.rif ? 'border-red-500' : 'border-slate-200'} ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.rif} onChange={e => setCompanyData({...companyData, rif: e.target.value})} />{registrationErrors.rif && <p className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.rif}</p>}</div>
+                <div><label htmlFor="reg-nombre" className="text-[10px] font-black uppercase block text-center">Nombre Comercial *</label><input id="reg-nombre" className={`w-full border rounded-xl px-4 py-3 text-center ${registrationErrors.name ? 'border-red-500' : 'border-slate-200'} ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.name} onChange={e => setCompanyData({...companyData, name: e.target.value})} />{registrationErrors.name && <p role="alert" className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.name}</p>}</div>
+                <div><label htmlFor="reg-rif" className="text-[10px] font-black uppercase block text-center">RIF *</label><input id="reg-rif" className={`w-full border rounded-xl px-4 py-3 text-center uppercase ${registrationErrors.rif ? 'border-red-500' : 'border-slate-200'} ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.rif} onChange={e => setCompanyData({...companyData, rif: e.target.value})} />{registrationErrors.rif && <p role="alert" className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.rif}</p>}</div>
                 <div><label htmlFor="reg-rtn" className="text-[10px] font-black uppercase block text-center">RTN (opcional)</label><input id="reg-rtn" className={`w-full border rounded-xl px-4 py-3 text-center ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.rtn} onChange={e => setCompanyData({...companyData, rtn: e.target.value})} /></div>
                 <div><label htmlFor="reg-telefono" className="text-[10px] font-black uppercase block text-center">Teléfono</label><input id="reg-telefono" type="tel" className={`w-full border rounded-xl px-4 py-3 text-center ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.phone} onChange={e => setCompanyData({...companyData, phone: e.target.value})} /></div>
                 <div><label htmlFor="reg-email" className="text-[10px] font-black uppercase block text-center">Correo electrónico</label><input id="reg-email" type="email" className={`w-full border rounded-xl px-4 py-3 text-center ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.email} onChange={e => setCompanyData({...companyData, email: e.target.value})} /></div>
-                <div><label htmlFor="reg-estado" className="text-[10px] font-black uppercase block text-center">Estado *</label><select id="reg-estado" className={`w-full border rounded-xl px-4 py-3 text-center ${registrationErrors.state ? 'border-red-500' : 'border-slate-200'} ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.state} onChange={e => setCompanyData({...companyData, state: e.target.value, city: ''})}><option value="">Seleccione</option>{venezuelaStates.map(s => <option key={s}>{s}</option>)}</select>{registrationErrors.state && <p className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.state}</p>}</div>
-                <div><label htmlFor="reg-municipio" className="text-[10px] font-black uppercase block text-center">Municipio *</label><select id="reg-municipio" className={`w-full border rounded-xl px-4 py-3 text-center ${registrationErrors.city ? 'border-red-500' : 'border-slate-200'} ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.city} onChange={e => setCompanyData({...companyData, city: e.target.value})} disabled={!companyData.state}><option value="">Seleccione</option>{(municipalities[companyData.state] || []).map(c => <option key={c}>{c}</option>)}</select>{registrationErrors.city && <p className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.city}</p>}</div>
-                <div><label htmlFor="reg-direccion" className="text-[10px] font-black uppercase block text-center">Dirección exacta *</label><input id="reg-direccion" className={`w-full border rounded-xl px-4 py-3 text-center ${registrationErrors.address ? 'border-red-500' : 'border-slate-200'} ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.address} onChange={e => setCompanyData({...companyData, address: e.target.value})} placeholder="Calle, número, referencia" />{registrationErrors.address && <p className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.address}</p>}</div>
+                <div><label htmlFor="reg-estado" className="text-[10px] font-black uppercase block text-center">Estado *</label><select id="reg-estado" className={`w-full border rounded-xl px-4 py-3 text-center ${registrationErrors.state ? 'border-red-500' : 'border-slate-200'} ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.state} onChange={e => setCompanyData({...companyData, state: e.target.value, city: ''})}><option value="">Seleccione</option>{venezuelaStates.map(s => <option key={s}>{s}</option>)}</select>{registrationErrors.state && <p role="alert" className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.state}</p>}</div>
+                <div><label htmlFor="reg-municipio" className="text-[10px] font-black uppercase block text-center">Municipio *</label><select id="reg-municipio" className={`w-full border rounded-xl px-4 py-3 text-center ${registrationErrors.city ? 'border-red-500' : 'border-slate-200'} ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.city} onChange={e => setCompanyData({...companyData, city: e.target.value})} disabled={!companyData.state}><option value="">Seleccione</option>{(municipalities[companyData.state] || []).map(c => <option key={c}>{c}</option>)}</select>{registrationErrors.city && <p role="alert" className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.city}</p>}</div>
+                <div><label htmlFor="reg-direccion" className="text-[10px] font-black uppercase block text-center">Dirección exacta *</label><input id="reg-direccion" className={`w-full border rounded-xl px-4 py-3 text-center ${registrationErrors.address ? 'border-red-500' : 'border-slate-200'} ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={companyData.address} onChange={e => setCompanyData({...companyData, address: e.target.value})} placeholder="Calle, número, referencia" />{registrationErrors.address && <p role="alert" className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.address}</p>}</div>
                 <div className={`rounded-2xl overflow-hidden border h-40 relative flex items-center justify-center ${contrastMode === 'high-contrast' ? 'bg-black border-white' : 'bg-slate-100'} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300' : ''}`}><MapPin size={40} className={`${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`} /><span className={`absolute bottom-2 text-xs text-center px-2 ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Ubicación: {companyData.address}, {companyData.city}, {companyData.state}</span></div>
                 <div><span id="sector-group-label" className="text-[10px] font-black uppercase block text-center">Sector * <span className="font-normal text-slate-600">(determina las preguntas)</span></span>
                   <div role="group" aria-labelledby="sector-group-label" className="grid grid-cols-2 gap-3">
@@ -2080,7 +2099,7 @@ useEffect(() => {
                       </button>
                     ))}
                   </div>
-                  {registrationErrors.sector && <p className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.sector}</p>}
+                  {registrationErrors.sector && <p role="alert" className="text-red-500 text-xs text-center mt-1 flex items-center justify-center gap-1"><AlertTriangle size={12} /> {registrationErrors.sector}</p>}
                 </div>
               </div>
             </div>
@@ -2209,8 +2228,8 @@ useEffect(() => {
               {authView === 'register' && (
                 <form onSubmit={handleRegisterUser} className={`p-4 rounded-xl mb-4 ${contrastMode === 'high-contrast' ? 'bg-black border border-white' : 'bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black border border-yellow-300' : ''}`}>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                    <input type="email" aria-label="Email del usuario" placeholder="Email del usuario" className={`border rounded-xl px-4 py-2 ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : ''} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} required />
-                    <input type="password" aria-label="Contraseña" placeholder="Contraseña" className={`border rounded-xl px-4 py-2 ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : ''} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} required />
+                    <input type="email" aria-label="Email del usuario" placeholder="Email del usuario" autoComplete="email" className={`border rounded-xl px-4 py-2 ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : ''} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} required />
+                    <input type="password" aria-label="Contraseña" placeholder="Contraseña" autoComplete="new-password" className={`border rounded-xl px-4 py-2 ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : ''} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} required />
                     <select aria-label="Rol del usuario" className={`border rounded-xl px-4 py-2 ${contrastMode === 'high-contrast' ? 'bg-black text-white border-white' : ''} ${contrastMode === 'yellow-on-black' ? 'bg-black text-yellow-300 border-yellow-300' : ''}`} value={newUserRole} onChange={e => setNewUserRole(e.target.value)}>
                       <option value="user">Usuario</option>
                       <option value="admin">Administrador</option>
