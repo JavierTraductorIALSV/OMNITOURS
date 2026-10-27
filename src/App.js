@@ -2040,7 +2040,6 @@ useEffect(() => {
               <div className="flex justify-center items-center gap-8 flex-wrap">
                 <img src="/iaet-logo.png" alt="IAET" className="h-12 w-auto opacity-70" />
                 <img src="/logo-zumaque.png" alt="Grupo Zumaque, Viajes y Turismo Corporativo" className="h-12 w-auto opacity-70" />
-                <div className={`text-xs font-bold ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Instituto de Altos Estudios Transdisciplinarios</div>
               </div>
             </div>
 
