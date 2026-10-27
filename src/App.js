@@ -16,7 +16,7 @@ import { Document, Packer, Paragraph, TextRun, ImageRun, AlignmentType, Header, 
 import { jsPDF } from 'jspdf';
 import fuenteCaligrafia from './assets/fuentes/GreatVibes-Regular.ttf';
 
-import { getModulesBySector, calcularPorcentajesPorDiscapacidad, coberturaAuditoria, FichasPorDiscapacidad } from './catalogoAccesibilidad';
+import { getModulesBySector, calcularPorcentajesPorDiscapacidad, coberturaAuditoria, FichasPorDiscapacidad, GRUPOS_DISCAPACIDAD } from './catalogoAccesibilidad';
 
 // ============================================
 // FUNCIONES AUXILIARES
@@ -442,7 +442,7 @@ const App = () => {
   const [filteredCompanies, setFilteredCompanies] = useState([]);
   const [respuestasPorEmpresa, setRespuestasPorEmpresa] = useState({});
   const [selectedState, setSelectedState] = useState('');
-  const [statsByState, setStatsByState] = useState([]);
+  const [resumenEstados, setResumenEstados] = useState([]);
   const [uploadMessage, setUploadMessage] = useState({ show: false, text: '', type: '' });
   const [searchRif, setSearchRif] = useState('');
   const [searchResult, setSearchResult] = useState(null);
@@ -454,6 +454,7 @@ const App = () => {
   const [respuestasOriginales, setRespuestasOriginales] = useState({});
   const [cargandoEdicion, setCargandoEdicion] = useState(false);
   const [guardandoEdicion, setGuardandoEdicion] = useState(false);
+  const [guardandoRegistro, setGuardandoRegistro] = useState(false);
   const [empresaABorrar, setEmpresaABorrar] = useState(null);
   const [rifConfirmacion, setRifConfirmacion] = useState('');
   const [borrando, setBorrando] = useState(false);
@@ -960,6 +961,20 @@ useEffect(() => {
       }
 
       const totales = totalesDelCatalogo(empresaEnEdicion.sector, edicionRespuestas);
+      // El RIF es clave de negocio: al editarlo no puede chocar con el de otra
+      // empresa (se excluye la propia con neq).
+      const rifNuevo = edicionDatos.rif.trim().toUpperCase();
+      const { data: chocante, error: errorChocante } = await supabase
+        .from('companies')
+        .select('id, name')
+        .eq('rif', rifNuevo)
+        .neq('id', id)
+        .maybeSingle();
+      if (errorChocante) throw errorChocante;
+      if (chocante) {
+        alert(`El RIF ${rifNuevo} ya pertenece a "${chocante.name}". Cada empresa debe tener un RIF único.`);
+        return;
+      }
       const { error: eEmpresa } = await supabase.from('companies').update({
         name: edicionDatos.name.trim(),
         rif: edicionDatos.rif.trim().toUpperCase(),
@@ -972,7 +987,12 @@ useEffect(() => {
         total_percentage: totales.pct,
         updated_at: new Date().toISOString()
       }).eq('id', id);
-      if (eEmpresa) throw eEmpresa;
+      if (eEmpresa) {
+        if (eEmpresa.code === '23505') {
+          throw new Error(`Ya existe otra empresa con el RIF ${rifNuevo}.`);
+        }
+        throw eEmpresa;
+      }
 
       const resumen = `✅ Registro actualizado.\n\n${edicionDatos.name.trim()}\nPuntaje: ${totales.score} de ${totales.max} (${totales.pct}%)\nRespuestas modificadas: ${tocadas.length}`;
       cerrarEdicionEmpresa();
@@ -1078,7 +1098,6 @@ useEffect(() => {
       if (error) throw error;
       setAllCompanies(data || []);
       setFilteredCompanies(data || []);
-      calcularStatsPorEstado(data || []);
       cargarRespuestasPorEmpresa((data || []).map(c => c.id));
     } catch (error) {
       console.error('Error cargando empresas:', error);
@@ -1141,46 +1160,84 @@ useEffect(() => {
     else setSearchResult({ found: false, rif: rifUpper });
   };
 
-  const calcularStatsPorEstado = (companies) => {
-    const stats = {};
-    companies.forEach(emp => {
-      if (!emp.address) return;
-      const parts = emp.address.split(',');
-      const estado = parts.length > 2 ? parts[2].trim() : 'Desconocido';
-      if (!stats[estado]) stats[estado] = { count: 0, sumPct: 0 };
-      stats[estado].count++;
-      stats[estado].sumPct += emp.total_percentage || 0;
-    });
-    const statsArray = Object.entries(stats).map(([estado, data]) => ({
-      estado,
-      cantidad: data.count,
-      promedio: Math.round(data.sumPct / data.count)
-    }));
-    setStatsByState(statsArray);
+  // Las direcciones son texto libre con comas dentro de cada parte
+  // (p. ej. "al lado del ipasme"), así que no se puede confiar en la posición:
+  // el estado es la ÚLTIMA parte que coincide con la lista oficial.
+  const partesDeDireccion = (address) => {
+    const partes = (address || '').split(',').map(p => p.trim()).filter(Boolean);
+    for (let i = partes.length - 1; i >= 0; i--) {
+      const estado = venezuelaStates.find(v => v.toLowerCase() === partes[i].toLowerCase());
+      if (estado) return { estado, municipio: i > 0 ? partes[i - 1] : '', partes };
+    }
+    return { estado: 'Desconocido', municipio: '', partes };
   };
+
+  const promedioDe = (emps) => emps.length
+    ? Math.round(emps.reduce((a, e) => a + (e.total_percentage || 0), 0) / emps.length)
+    : 0;
+
+  const gruposDe = (emps) => GRUPOS_DISCAPACIDAD.map(g => {
+    const pcts = emps
+      .map(e => {
+        const res = calcularPorcentajesPorDiscapacidad(e.sector, respuestasPorEmpresa[e.id] || {});
+        const fila = res.find(x => x.id === g.id);
+        return fila ? fila.pct : null;
+      })
+      .filter(p => typeof p === 'number');
+    return {
+      id: g.id,
+      label: g.label,
+      pct: pcts.length ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length) : null
+    };
+  });
+
+  const construirResumen = (companies) => {
+    const porEstado = {};
+    companies.forEach(emp => {
+      const { estado, municipio } = partesDeDireccion(emp.address);
+      if (!porEstado[estado]) porEstado[estado] = { emps: [], municipios: {} };
+      porEstado[estado].emps.push(emp);
+      const claveMuni = municipio || 'Sin municipio';
+      if (!porEstado[estado].municipios[claveMuni]) porEstado[estado].municipios[claveMuni] = [];
+      porEstado[estado].municipios[claveMuni].push(emp);
+    });
+    return Object.entries(porEstado)
+      .map(([estado, data]) => ({
+        estado,
+        cantidad: data.emps.length,
+        promedio: promedioDe(data.emps),
+        grupos: gruposDe(data.emps),
+        municipios: Object.entries(data.municipios)
+          .map(([municipio, emps]) => ({
+            municipio,
+            cantidad: emps.length,
+            promedio: promedioDe(emps),
+            grupos: gruposDe(emps)
+          }))
+          .sort((a, b) => b.cantidad - a.cantidad || a.municipio.localeCompare(b.municipio))
+      }))
+      .sort((a, b) => b.cantidad - a.cantidad || a.estado.localeCompare(b.estado));
+  };
+
+  useEffect(() => {
+    setResumenEstados(construirResumen(allCompanies));
+  }, [allCompanies, respuestasPorEmpresa]);
 
   const filtrarPorEstado = (estado) => {
     setSelectedState(estado);
     if (!estado) setFilteredCompanies(allCompanies);
-    else {
-      const filtradas = allCompanies.filter(emp => {
-        if (!emp.address) return false;
-        const parts = emp.address.split(',');
-        return parts.length > 2 && parts[2].trim() === estado;
-      });
-      setFilteredCompanies(filtradas);
-    }
+    else setFilteredCompanies(allCompanies.filter(emp => partesDeDireccion(emp.address).estado === estado));
   };
 
   const exportToExcel = () => {
     const data = filteredCompanies.map(emp => {
-      const parts = emp.address ? emp.address.split(',') : [];
-      const estado = parts.length > 2 ? parts[2].trim() : 'No especificado';
+      const { estado, municipio } = partesDeDireccion(emp.address);
       return {
         'Nombre': emp.name,
         'RIF': emp.rif,
         'Sector': emp.sector,
-        'Estado': estado,
+        'Estado': estado === 'Desconocido' ? 'No especificado' : estado,
+        'Municipio': municipio || 'No especificado',
         'Porcentaje': `${emp.total_percentage || 0}%`,
         'Fecha Registro': new Date(emp.created_at).toLocaleDateString(),
         'Registrado por': emp.user_id || 'Desconocido'
@@ -1437,10 +1494,30 @@ useEffect(() => {
   };
 
   const saveRegistrationToSupabase = async () => {
+    // Sin este candado el botón "Finalizar" queda vivo durante el insert y un
+    // segundo clic (o un clic tras esperar respuesta lenta) registra la empresa
+    // dos veces: fue exactamente así como nació el duplicado de J-020233454.
+    if (guardandoRegistro) return;
+    setGuardandoRegistro(true);
     try {
       const userId = user?.id;
       if (!userId) {
         alert('No se pudo identificar al usuario');
+        return;
+      }
+
+      // El RIF es la clave de negocio: una empresa no puede registrarse dos
+      // veces. Se revisa antes de insertar y el índice único de la base es la
+      // última línea de defensa (error 23505 más abajo).
+      const rifUpper = companyData.rif.trim().toUpperCase();
+      const { data: previa, error: errorPrevia } = await supabase
+        .from('companies')
+        .select('id, name')
+        .eq('rif', rifUpper)
+        .maybeSingle();
+      if (errorPrevia) throw errorPrevia;
+      if (previa) {
+        alert(`Ya existe una empresa registrada con el RIF ${rifUpper}: ${previa.name}.\n\nCada empresa debe registrarse una sola vez; si eres otra empresa, verifica el RIF escrito.`);
         return;
       }
 
@@ -1458,7 +1535,7 @@ useEffect(() => {
         .from('companies')
         .insert({
           name: companyData.name,
-          rif: companyData.rif.toUpperCase(),
+          rif: rifUpper,
           rtn: companyData.rtn,
           sector: companyData.sector,
           address: `${companyData.address}, ${companyData.city}, ${companyData.state}`,
@@ -1470,7 +1547,13 @@ useEffect(() => {
         })
         .select()
         .maybeSingle();
-      if (companyError) throw companyError;
+      if (companyError) {
+        // 23505 = violación del índice único de RIF: ganó la carrera otro envío.
+        if (companyError.code === '23505') {
+          throw new Error(`Ya existe una empresa con el RIF ${rifUpper}. El registro quedó detenido para no duplicarla.`);
+        }
+        throw companyError;
+      }
 
       const answersToInsert = Object.entries(answers).map(([qId, value]) => ({ company_id: company.id, question_id: qId, score: value }));
       if (answersToInsert.length) await supabase.from('answers').insert(answersToInsert);
@@ -1508,6 +1591,8 @@ useEffect(() => {
     } catch (error) {
       console.error(error);
       alert('Error al guardar: ' + error.message);
+    } finally {
+      setGuardandoRegistro(false);
     }
   };
 
@@ -2170,12 +2255,11 @@ useEffect(() => {
                   {currentModule < totalModules - 1 ? (
                     <button onClick={() => { if (isCurrentModuleComplete()) { setCurrentModule(m => m+1); saveProgressLocally(); } }} className="flex-[2] bg-indigo-600 text-white py-4 rounded-2xl active:bg-teal-500">Siguiente módulo →</button>
                   ) : (
-                    <button onClick={async () => {
+                    <button disabled={guardandoRegistro} onClick={async () => {
                       if (isCurrentModuleComplete()) {
                         await saveRegistrationToSupabase();
-                        setView('results');
                       }
-                    }} className="flex-[2] bg-green-600 text-white py-4 rounded-2xl active:bg-teal-500">Finalizar</button>
+                    }} className="flex-[2] bg-green-600 text-white py-4 rounded-2xl active:bg-teal-500 disabled:opacity-50">Finalizar</button>
                   )}
                 </div>
               </div>
@@ -2278,34 +2362,68 @@ useEffect(() => {
             </div>
 
             <div className={`rounded-2xl shadow p-6 ${contrastMode === 'high-contrast' ? 'bg-black border border-white' : 'bg-white'} ${contrastMode === 'yellow-on-black' ? 'bg-black border border-yellow-300' : ''}`}>
-              <h3 className={`text-xl font-black mb-4 flex items-center gap-2 ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}><BarChart size={24} className={`${contrastMode === 'high-contrast' ? 'text-yellow-300' : 'text-indigo-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}/> Resumen por estado</h3>
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className={`${contrastMode === 'high-contrast' ? 'bg-black' : 'bg-gray-50'} ${contrastMode === 'yellow-on-black' ? 'bg-black' : ''}`}>
-                    <tr>
-                      <th scope="col" className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Estado</th>
-                      <th scope="col" className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Empresas</th>
-                      <th scope="col" className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Promedio accesibilidad</th>
-                    </tr>
-                  </thead>
-                  <tbody className={`${contrastMode === 'high-contrast' ? 'bg-black divide-white' : 'bg-white divide-gray-200'} ${contrastMode === 'yellow-on-black' ? 'bg-black divide-yellow-300' : ''}`}>
-                    {statsByState.map((stat, idx) => (
-                      <tr key={idx} className={`${contrastMode === 'high-contrast' ? 'hover:bg-gray-800' : 'hover:bg-gray-50'} ${contrastMode === 'yellow-on-black' ? 'hover:bg-gray-800' : ''} cursor-pointer`} onClick={() => filtrarPorEstado(stat.estado)}>
-                        <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-900'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{stat.estado}</td>
-                        <td className={`px-6 py-4 whitespace-nowrap text-sm ${contrastMode === 'high-contrast' ? 'text-white' : 'text-gray-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{stat.cantidad}</td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center gap-2">
-                            <div className="w-24 bg-gray-200 rounded-full h-2">
-                              <div className={`h-2 rounded-full ${getPctColor(stat.promedio)}`} style={{ width: `${stat.promedio}%` }}></div>
-                            </div>
-                            <span className={`text-sm font-bold ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{stat.promedio}%</span>
+              <h3 className={`text-xl font-black mb-2 flex items-center gap-2 ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}><BarChart size={24} className={`${contrastMode === 'high-contrast' ? 'text-yellow-300' : 'text-indigo-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}/> Resumen por estado y municipio</h3>
+              <p className={`text-xs mb-4 ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Haz clic en un estado para filtrar la tabla de empresas. Los porcentajes por discapacidad promedian solo las empresas con respuestas en ese grupo.</p>
+              {resumenEstados.length === 0 ? (
+                <p className={`text-sm ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>No hay empresas registradas todavía.</p>
+              ) : (
+                <div className="space-y-4">
+                  {resumenEstados.map((stat) => (
+                    <div key={stat.estado} className={`rounded-xl border overflow-hidden ${contrastMode === 'high-contrast' ? 'border-white bg-black' : 'border-slate-200 bg-slate-50'} ${contrastMode === 'yellow-on-black' ? 'border-yellow-300 bg-black' : ''}`}>
+                      <button
+                        type="button"
+                        onClick={() => filtrarPorEstado(stat.estado)}
+                        className={`w-full text-left px-4 py-3 ${contrastMode === 'high-contrast' ? 'hover:bg-gray-800' : 'hover:bg-slate-100'} ${contrastMode === 'yellow-on-black' ? 'hover:bg-gray-800' : ''}`}
+                      >
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <span className={`font-black ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-800'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{stat.estado}</span>
+                          <span className={`text-xs font-bold ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-500'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{stat.cantidad} empresa{stat.cantidad === 1 ? '' : 's'}</span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-2">
+                          <div className={`w-32 rounded-full h-2 ${contrastMode === 'high-contrast' ? 'bg-gray-700' : 'bg-gray-200'} ${contrastMode === 'yellow-on-black' ? 'bg-gray-700' : ''}`}>
+                            <div className={`h-2 rounded-full ${getPctColor(stat.promedio)}`} style={{ width: `${stat.promedio}%` }}></div>
                           </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                          <span className={`text-sm font-bold ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{stat.promedio}%</span>
+                          <span className={`text-xs ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-400'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>accesibilidad promedio</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {stat.grupos.map(g => (
+                            <span key={g.id} className={`px-2 py-0.5 rounded-full text-xs font-bold ${contrastMode === 'high-contrast' ? 'bg-white text-black' : 'bg-white text-slate-600 border border-slate-200'} ${contrastMode === 'yellow-on-black' ? 'bg-yellow-300 text-black' : ''}`}>
+                              {g.label}: {g.pct === null ? '—' : `${g.pct}%`}
+                            </span>
+                          ))}
+                        </div>
+                      </button>
+                      <div className={`px-4 pb-3 ${contrastMode === 'high-contrast' ? 'bg-black' : 'bg-white'} ${contrastMode === 'yellow-on-black' ? 'bg-black' : ''}`}>
+                        <p className={`text-xs font-black uppercase tracking-wider mb-2 ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-400'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Municipios</p>
+                        <div className="space-y-2">
+                          {stat.municipios.map((muni) => (
+                            <div key={muni.municipio} className={`rounded-lg px-3 py-2 ${contrastMode === 'high-contrast' ? 'bg-gray-900 border border-white' : 'bg-slate-50 border border-slate-100'} ${contrastMode === 'yellow-on-black' ? 'bg-gray-900 border border-yellow-300' : ''}`}>
+                              <div className="flex items-center justify-between flex-wrap gap-2">
+                                <span className={`text-sm font-bold ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-700'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{muni.municipio}</span>
+                                <span className={`text-xs ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-400'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{muni.cantidad} empresa{muni.cantidad === 1 ? '' : 's'}</span>
+                              </div>
+                              <div className="flex items-center gap-2 mt-1">
+                                <div className={`w-24 rounded-full h-1.5 ${contrastMode === 'high-contrast' ? 'bg-gray-700' : 'bg-gray-200'} ${contrastMode === 'yellow-on-black' ? 'bg-gray-700' : ''}`}>
+                                  <div className={`h-1.5 rounded-full ${getPctColor(muni.promedio)}`} style={{ width: `${muni.promedio}%` }}></div>
+                                </div>
+                                <span className={`text-xs font-bold ${contrastMode === 'high-contrast' ? 'text-white' : ''} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>{muni.promedio}%</span>
+                              </div>
+                              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                {muni.grupos.map(g => (
+                                  <span key={g.id} className={`px-2 py-0.5 rounded-full text-xs ${contrastMode === 'high-contrast' ? 'bg-white text-black' : 'bg-white text-slate-500 border border-slate-200'} ${contrastMode === 'yellow-on-black' ? 'bg-yellow-300 text-black' : ''}`}>
+                                    {g.label}: {g.pct === null ? '—' : `${g.pct}%`}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className={`p-6 rounded-2xl shadow ${contrastMode === 'high-contrast' ? 'bg-black border border-white' : 'bg-white'} ${contrastMode === 'yellow-on-black' ? 'bg-black border border-yellow-300' : ''}`}>

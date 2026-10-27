@@ -54,6 +54,7 @@ jest.mock('./supabaseClient', () => {
       let datos = registros[tabla] ? registros[tabla].slice() : [];
       ops.forEach(o => {
         if (o.t === 'eq') datos = datos.filter(r => String(r[o.c]) === String(o.v));
+        if (o.t === 'neq') datos = datos.filter(r => String(r[o.c]) !== String(o.v));
         if (o.t === 'in') datos = datos.filter(r => o.arr.map(String).includes(String(r[o.c])));
       });
 
@@ -76,6 +77,7 @@ jest.mock('./supabaseClient', () => {
     const self = {
       select: () => { ops.push({ t: 'select' }); return self; },
       eq: (c, v) => { ops.push({ t: 'eq', c, v }); return self; },
+      neq: (c, v) => { ops.push({ t: 'neq', c, v }); return self; },
       in: (c, arr) => { ops.push({ t: 'in', c, arr }); return self; },
       order: (c, o) => { ops.push({ t: 'order', c, o }); return self; },
       delete: () => { ops.push({ t: 'delete' }); return self; },
@@ -202,6 +204,19 @@ describe('Panel de administración: modales de empresas', () => {
     expect(document.body.textContent).toContain('Hotel Prueba');
   });
 
+  test('el resumen agrupa por estado y municipio con la dirección de texto libre', async () => {
+    // 'Calle 1, Baruta, Miranda': el estado es la ÚLTIMA parte oficial (Miranda)
+    // y el municipio la inmediatamente anterior (Baruta), no una posición fija.
+    const titulo = Array.from(document.querySelectorAll('h3')).find(h => /Resumen por estado y municipio/.test(h.textContent));
+    expect(titulo).toBeTruthy();
+    const tarjeta = titulo.parentElement;
+    expect(tarjeta.textContent).toContain('Miranda');
+    expect(tarjeta.textContent).toContain('Baruta');
+    expect(tarjeta.textContent).not.toContain('Desconocido');
+    // al menos un chip de discapacidad con su etiqueta
+    expect(/Motora|Visual|Auditiva|Cognitiva|Lengua de señas|Neurodiversidad/.test(tarjeta.textContent)).toBe(true);
+  });
+
   test('abre el modal de edición con los campos precargados', async () => {
     const disparador = await abrirEdicion();
     expect(modalEdicion()).toBeTruthy();
@@ -324,6 +339,32 @@ describe('Panel de administración: modales de empresas', () => {
     expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('Respuestas modificadas: 2'));
     expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('Puntaje: 7 de 48 (15%)'));
     expect(modalEdicion()).toBeFalsy();
+  });
+
+  test('guardar con un RIF que ya pertenece a otra empresa se detiene', async () => {
+    const registros = global.__stub.registros;
+    registros.companies.push({
+      id: 50, name: 'Otra Empresa C.A.', rif: 'J-50505050-5', rtn: '',
+      sector: 'playa', address: 'Calle 2, Mérida, Mérida', phone: '', email: '',
+      total_score: 0, total_percentage: 0, user_id: 'u1'
+    });
+
+    await abrirEdicion();
+    await setValor(porId('ed-rif'), 'j-50505050-5');
+
+    const llamadasAntes = global.__stub.llamadas.length;
+    const guardar = Array.from(modalEdicion().querySelectorAll('button'))
+      .find(b => /Guardar cambios/.test(b.textContent));
+    await clic(guardar);
+
+    expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('ya pertenece a "Otra Empresa C.A."'));
+    expect(modalEdicion()).toBeTruthy(); // no se cierra: nada se guardó
+    const nuevas = global.__stub.llamadas.slice(llamadasAntes);
+    expect(nuevas.find(l => l.tabla === 'companies' && l.ops.some(o => o.t === 'update'))).toBeFalsy();
+
+    await tecla('Escape');
+    await flush();
+    registros.companies = registros.companies.filter(c => c.id !== 50);
   });
 
   test('al reabrir, los cambios persisten y el contador se reinicia', async () => {
