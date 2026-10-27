@@ -443,7 +443,7 @@ const DisabilityPortal = ({ onBack }) => {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-purple-50 to-pink-50 p-4">
         <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full">
-          <img src="/logo-omnitours-apilado.png" alt="Omnitours" className="w-44 mx-auto mb-6 h-auto" />
+          <img src="/logo-omnitours.jpeg" alt="Omnitours" className="w-28 mx-auto mb-6 h-auto" />
           <h1 ref={tituloRef} tabIndex={-1} className="text-2xl font-black text-center mb-2 text-purple-700">Personas con Discapacidad</h1>
           <p className="text-center text-slate-500 text-sm mb-6">Inicia sesión para consultar lugares accesibles</p>
 
@@ -516,7 +516,7 @@ const DisabilityPortal = ({ onBack }) => {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-purple-50 to-pink-50 p-4">
         <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full">
-          <img src="/logo-omnitours-apilado.png" alt="Omnitours" className="w-44 mx-auto mb-6 h-auto" />
+          <img src="/logo-omnitours.jpeg" alt="Omnitours" className="w-28 mx-auto mb-6 h-auto" />
           <h1 ref={tituloRef} tabIndex={-1} className="text-2xl font-black text-center mb-2 text-purple-700">Crear Cuenta</h1>
           <p className="text-center text-slate-500 text-sm mb-6">Completa tus datos para acceder</p>
 
@@ -633,7 +633,7 @@ const DisabilityPortal = ({ onBack }) => {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-purple-50 to-pink-50 p-4">
         <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full">
-          <img src="/logo-omnitours-apilado.png" alt="Omnitours" className="w-44 mx-auto mb-6 h-auto" />
+          <img src="/logo-omnitours.jpeg" alt="Omnitours" className="w-28 mx-auto mb-6 h-auto" />
           <h1 ref={tituloRef} tabIndex={-1} className="text-2xl font-black text-center mb-2 text-purple-700">Recuperar acceso</h1>
 
           {errorMsg && (
@@ -698,7 +698,7 @@ const DisabilityPortal = ({ onBack }) => {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-purple-50 to-pink-50 p-4">
         <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full">
-          <img src="/logo-omnitours-apilado.png" alt="Omnitours" className="w-44 mx-auto mb-6 h-auto" />
+          <img src="/logo-omnitours.jpeg" alt="Omnitours" className="w-28 mx-auto mb-6 h-auto" />
           <h1 ref={tituloRef} tabIndex={-1} className="text-2xl font-black text-center mb-2 text-purple-700">Nueva contraseña</h1>
           <p className="text-center text-slate-500 text-sm mb-6">
             Escribe la contraseña que usarás de ahora en adelante.

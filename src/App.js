@@ -92,14 +92,14 @@ const fetchImagenValidada = async (url) => {
 
 const membreteOmniIaet = async () => {
   const [omni, iaet] = await Promise.all([
-    fetchImagenValidada('/logo-omnitours-horizontal.png'),
+    fetchImagenValidada('/logo-omnitours.jpeg'),
     fetchImagenValidada('/iaet-logo.png')
   ]);
   return new Header({
     children: [
       new Paragraph({
         children: [
-          omni ? imagenEnReporte(omni, 160) : new TextRun(''),
+          omni ? imagenEnReporte(omni, 54) : new TextRun(''),
           new TextRun('      '),
           iaet ? imagenEnReporte(iaet, 50) : new TextRun('')
         ],
@@ -163,9 +163,10 @@ const redimensionarParaPdf = (asset, anchoMax, formato) => new Promise(resolve =
 });
 
 // El certificado se dibuja en milímetros sobre A4 apaisado. El logo de Omnitours
-// es un PNG transparente y va sobre panel claro con filete dorado, igual que el de
-// IAET; el trofeo sí es una fotografía con fondo difuminado, así que su marco se
-// lee como parte del diseño y no como un recuadro accidental sobre el crema.
+// es el JPEG oficial vertical y no se puede recortar ni alterar: va completo sobre
+// panel claro con filete dorado, igual que el de IAET; el trofeo sí es una
+// fotografía con fondo difuminado, así que su marco se lee como parte del diseño
+// y no como un recuadro accidental sobre el crema.
 const dibujarCertificado = (doc, d) => {
   const CREMA = [250, 244, 230];
   const PANEL = [255, 253, 246];
@@ -196,8 +197,8 @@ const dibujarCertificado = (doc, d) => {
     doc.setFillColor(...PANEL);
     doc.setDrawColor(...ORO);
     doc.setLineWidth(0.6);
-    doc.rect(16, 20.45, 64, 21.1, 'FD');
-    doc.addImage(d.imagenes.omni.data, d.imagenes.omni.formato, 18, 22.45, 60, 17.1);
+    doc.rect(16, 16, 33, 47.2, 'FD');
+    doc.addImage(d.imagenes.omni.data, d.imagenes.omni.formato, 17.5, 17.5, 30, 44.2);
   }
   if (d.imagenes.iaet) {
     doc.setFillColor(...PANEL);
@@ -1774,7 +1775,7 @@ useEffect(() => {
       vencimiento.setFullYear(vencimiento.getFullYear() + 1);
 
       const [omni, iaet, trofeo, fuenteBase64] = await Promise.all([
-        cargarAssetPdf('/logo-omnitours-horizontal.png').then(a => redimensionarParaPdf(a, 600, 'png')),
+        cargarAssetPdf('/logo-omnitours.jpeg').then(a => redimensionarParaPdf(a, 400, 'jpeg')),
         cargarAssetPdf('/iaet-logo.png').then(a => redimensionarParaPdf(a, 620, 'png')),
         cargarAssetPdf(nivel.trofeo).then(a => redimensionarParaPdf(a, 560, 'jpeg')),
         fetch(fuenteCaligrafia).then(r => r.arrayBuffer()).then(buf => aBase64(new Uint8Array(buf)))
@@ -1854,7 +1855,7 @@ useEffect(() => {
       <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 p-4">
         <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full">
           <img
-            src="/logo-omnitours-vertical.png"
+            src="/logo-omnitours.jpeg"
             alt="Omnitours"
             className="w-32 sm:w-36 md:w-40 lg:w-48 mx-auto mb-6 h-auto"
           />
@@ -1942,7 +1943,7 @@ useEffect(() => {
       <header className={`bg-white/90 backdrop-blur-md p-4 shadow-sm flex justify-between items-center sticky top-0 z-50 border-b ${contrastMode === 'high-contrast' ? 'bg-black border-white' : ''} ${contrastMode === 'yellow-on-black' ? 'bg-black border-yellow-300' : ''}`}>
         <div className="flex items-center gap-3">
           <img
-            src="/logo-omnitours-horizontal.png"
+            src="/logo-omnitours.jpeg"
             alt="Omnitours"
             className="h-9 sm:h-12 md:h-14 lg:h-16 xl:h-20 w-auto"
           />
@@ -2038,7 +2039,7 @@ useEffect(() => {
               <h3 className={`text-sm font-black uppercase tracking-widest mb-4 ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Aliados y apoyo</h3>
               <div className="flex justify-center items-center gap-8 flex-wrap">
                 <img src="/iaet-logo.png" alt="IAET" className="h-12 w-auto opacity-70" />
-                <img src="/logo-omnitours-horizontal.png" alt="Omnitours" className="h-12 w-auto opacity-70" />
+                <img src="/logo-omnitours.jpeg" alt="Omnitours" className="h-16 w-auto opacity-70" />
                 <div className={`text-xs font-bold ${contrastMode === 'high-contrast' ? 'text-white' : 'text-slate-600'} ${contrastMode === 'yellow-on-black' ? 'text-yellow-300' : ''}`}>Instituto de Altos Estudios Transdisciplinarios</div>
               </div>
             </div>
